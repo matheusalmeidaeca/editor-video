@@ -109,6 +109,7 @@ import kotlin.math.roundToInt
 
 internal fun MainActivity.buildUi() {
     val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    toolSheet = null
     val frame = FrameLayout(this)
     rootFrame = frame
     frame.addView(LiquidBackground(this), FrameLayout.LayoutParams(MATCH, MATCH))
@@ -228,7 +229,7 @@ internal fun MainActivity.buildUi() {
 
     val animRoot: ViewGroup
     if (!landscape) {
-        val root = vbox().apply { setPadding(dp(14), dp(34), dp(14), dp(40)) }
+        val root = vbox().apply { setPadding(dp(14), dp(8), dp(14), dp(16)) }
         root.addView(top)
         root.addView(progressBar, lpm(MATCH, dp(10), t = 8))
         root.addView(statusTv)
@@ -247,29 +248,93 @@ internal fun MainActivity.buildUi() {
         frame.addView(scroll, FrameLayout.LayoutParams(MATCH, MATCH))
         animRoot = root
     } else {
-        val outer = vbox().apply { setPadding(dp(14), dp(12), dp(14), dp(8)) }
-        outer.addView(top)
-        outer.addView(progressBar, lpm(MATCH, dp(8), t = 4))
-        outer.addView(statusTv)
-        val split = hbox().apply { gravity = Gravity.TOP }
-        val left = vbox()
-        left.addView(previewBox, lpm(MATCH, 0, weight = 1f))
-        left.addView(transport, lpm(MATCH, WRAP, t = 6))
-        left.addView(timeline, lpm(MATCH, dp(112), t = 6))
-        val right = vbox().apply { setPadding(0, 0, 0, dp(16)) }
-        right.addView(hscroll(actions))
-        right.addView(hscroll(toolsRow), lpm(MATCH, WRAP, t = 8))
-        right.addView(panel, lpm(MATCH, WRAP, t = 8))
-        val rs = ScrollView(this).apply {
-            isVerticalScrollBarEnabled = false
-            addView(right)
+        // v3.3.9: layout de paisagem no estilo do PowerDirector: barra à esquerda
+        // (voltar, biblioteca, texto, desfazer, refazer, excluir), prévia e linha do tempo
+        // no centro, faixa de ferramentas embaixo e barra à direita (exportar, menu, play).
+        top.removeAllViews()
+        titleBox.removeAllViews()
+        transport.removeAllViews()
+        val root = hbox().apply {
+            gravity = Gravity.TOP
+            setPadding(dp(6), dp(4), dp(6), dp(4))
         }
-        split.addView(left, lpm(0, MATCH, weight = 1.15f))
-        split.addView(rs, lpm(0, MATCH, l = 12, weight = 1f))
-        outer.addView(split, lpm(MATCH, 0, t = 8, weight = 1f))
-        frame.addView(outer, FrameLayout.LayoutParams(MATCH, MATCH))
-        animRoot = outer
+        fun bar() = vbox().apply {
+            background = glass(18)
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(4), dp(6), dp(4), dp(6))
+        }
+
+        val leftBar = bar()
+        leftBar.addView(iconBtn("←") { goHome() }, lpm(dp(42), dp(42), b = 6))
+        leftBar.addView(iconBtn("🎞") { showMediaLibrary() }, lpm(dp(42), dp(42), b = 6))
+        leftBar.addView(iconBtn("🔤") {
+            currentTool = 5
+            buildToolTabs()
+            showTool(5, true)
+            openToolSheet()
+        }, lpm(dp(42), dp(42), b = 6))
+        leftBar.addView(undoBtn, lpm(dp(42), dp(42), b = 6))
+        leftBar.addView(redoBtn, lpm(dp(42), dp(42), b = 6))
+        leftBar.addView(View(this), lpm(dp(1), 0, weight = 1f))
+        leftBar.addView(iconBtn("🗑") { delClip() }, lpm(dp(42), dp(42)))
+
+        val rightBar = bar()
+        exportBtn.textSize = 11f
+        exportBtn.setPadding(0, 0, 0, 0)
+        rightBar.addView(exportBtn, lpm(dp(54), dp(42), b = 6))
+        rightBar.addView(iconBtn("⋯") { editorMenu() }, lpm(dp(42), dp(42)))
+        rightBar.addView(View(this), lpm(dp(1), 0, weight = 1f))
+        rightBar.addView(playBtn, lpm(dp(46), dp(46)))
+
+        // centro: prévia, estado, nome/tempo, linha do tempo e faixa de ferramentas
+        val center = vbox()
+        center.addView(previewBox, lpm(MATCH, 0, weight = 1f))
+        center.addView(progressBar, lpm(MATCH, dp(6), t = 3))
+        center.addView(statusTv)
+        val info = hbox()
+        info.addView(nameTv, lpm(0, WRAP, weight = 1f))
+        info.addView(timeTv)
+        center.addView(info, lpm(MATCH, WRAP, t = 2))
+        center.addView(timeline, lpm(MATCH, dp(96), t = 3))
+        val dividir = actions.getChildAt(0)
+        actions.removeView(dividir)
+        val strip = hbox()
+        strip.addView(dividir, lpm(WRAP, WRAP, r = 6))
+        strip.addView(toolsRow)
+        strip.addView(actions)
+        center.addView(hscroll(strip), lpm(MATCH, WRAP, t = 4))
+
+        // as opções da ferramenta abrem numa folha por cima da linha do tempo
+        val sheetH = (resources.displayMetrics.heightPixels * 0.62f).toInt()
+        val sheet = vbox().apply {
+            background = glass(22, Color.parseColor("#F2071428"), 0x33FFFFFF)
+            setPadding(dp(10), dp(6), dp(10), dp(8))
+            visibility = View.GONE
+            isClickable = true
+        }
+        val sheetTop = hbox()
+        sheetTop.addView(iconBtn("⌄") { sheet.visibility = View.GONE }, lpm(dp(42), dp(42)))
+        sheetTop.addView(tv("Opções da ferramenta", 13f, cGrey), lpm(WRAP, WRAP, l = 8))
+        sheet.addView(sheetTop)
+        sheet.addView(
+            ScrollView(this).apply {
+                isVerticalScrollBarEnabled = false
+                addView(panel)
+            },
+            lpm(MATCH, 0, t = 4, weight = 1f)
+        )
+        toolSheet = sheet
+        val centerFrame = FrameLayout(this)
+        centerFrame.addView(center, FrameLayout.LayoutParams(MATCH, MATCH))
+        centerFrame.addView(sheet, FrameLayout.LayoutParams(MATCH, sheetH, Gravity.BOTTOM))
+
+        root.addView(leftBar, lpm(dp(54), MATCH))
+        root.addView(centerFrame, lpm(0, MATCH, l = 6, r = 6, weight = 1f))
+        root.addView(rightBar, lpm(dp(54), MATCH))
+        frame.addView(root, FrameLayout.LayoutParams(MATCH, MATCH))
+        animRoot = root
     }
+    applySystemInsets(frame)
     setContentView(frame)
 
     buildToolTabs()
@@ -306,6 +371,7 @@ internal fun MainActivity.buildToolTabs() {
             currentTool = i
             buildToolTabs()
             showTool(i, true)
+            openToolSheet()
         }
         press(tab)
         toolsRow.addView(tab, lpm(WRAP, WRAP, r = 8))
@@ -333,4 +399,9 @@ internal fun MainActivity.showTool(i: Int, animate: Boolean = false) {
         panel.animate().alpha(1f).translationY(0f).setDuration(260)
             .setInterpolator(DecelerateInterpolator()).start()
     }
+}
+
+/** Na paisagem, mostra a folha de opções da ferramenta; no retrato não faz nada. */
+internal fun MainActivity.openToolSheet() {
+    toolSheet?.visibility = View.VISIBLE
 }

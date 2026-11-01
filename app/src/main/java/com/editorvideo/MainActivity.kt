@@ -163,7 +163,7 @@ class MainActivity : ComponentActivity() {
     )
     internal val kenNames = listOf("Nenhum", "Aproximar", "Afastar", "Panorâmica →", "Panorâmica ←")
     internal val speeds = listOf(0.25f, 0.5f, 0.75f, 1f, 1.5f, 2f, 3f, 4f)
-    internal val toolNames = listOf("Cortar", "Velocidade", "Filtros", "Transformar", "Transição", "Texto", "Adesivos", "Mixer", "Formato")
+    internal val toolNames = listOf("Cortar", "Velocidade", "Efeitos", "Transformar", "Transição", "Texto", "Adesivos", "Volume", "Formato")
     internal val toolIcons = listOf("✂️", "⏩", "🎨", "🔄", "🔀", "🔤", "😀", "🔊", "📐")
     internal val posNames = listOf("Topo", "Centro", "Base")
     internal val posXNames = listOf("Esquerda", "Centro", "Direita")
@@ -282,8 +282,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = Color.parseColor("#050B18")
-        window.navigationBarColor = Color.parseColor("#050B18")
+        setupEdgeToEdge()
 
         player = ExoPlayer.Builder(this).build()
         player.addListener(object : Player.Listener {
@@ -887,6 +886,7 @@ class MainActivity : ComponentActivity() {
     /** Clipe "escolhido" com um toque na linha do tempo: só então a barra de ações do clipe aparece. */
     internal var clipPicked = false
     internal var clipGroup: View? = null
+    internal var toolSheet: View? = null
 
     internal fun selectClip(i: Int) {
         if (i !in clips.indices) { // toque fora dos clipes

@@ -206,6 +206,7 @@ internal fun MainActivity.showHome() {
     }
     outer.addView(scroll, lpm(MATCH, 0, weight = 1f))
     frame.addView(outer, FrameLayout.LayoutParams(MATCH, MATCH))
+    applySystemInsets(frame)
     setContentView(frame)
 }
 
