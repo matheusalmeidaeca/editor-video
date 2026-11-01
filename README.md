@@ -1,4 +1,4 @@
-# Editor de Vídeo 3.3.2 (Android, Kotlin + Media3)
+# Editor de Vídeo 3.3.3 (Android, Kotlin + Media3)
 
 Sem IA. Visual "osmótico": fundo líquido animado, painéis de vidro e botões que respiram.
 
@@ -19,7 +19,7 @@ transições entre clipes (fade no preto ou no branco), menu radial de adição,
 "Salvar e compartilhar" (H.264/HEVC, resolução e qualidade com tamanho estimado) e layout
 próprio para a tela deitada.
 
-**Novidades da 3.3.2 (organização do código, nada muda para quem usa):**
+**Novidades da 3.3.3 (organização do código, nada muda para quem usa):**
 - Mais três arquivos saíram do `MainActivity`: a montagem da tela e das abas (`UiBuild.kt`), a importação de vídeos (`Importing.kt`)
   e a prévia de texto (`Preview.kt`). O `MainActivity` caiu para cerca de 1.080 linhas.
 

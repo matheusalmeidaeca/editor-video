@@ -110,28 +110,29 @@ class MainActivity : ComponentActivity() {
 
     // ------------------------------------------------------------------ estado
 
-    internal val clips = mutableListOf<Clip>()
-    internal val texts = mutableListOf<TextItem>()
-    internal var selected = 0
+    internal val state = ProjectState()
+    internal val clips by state::clips
+    internal val texts by state::texts
+    internal var selected by state::selected
     internal var currentTool = 0
-    internal var musicUri: Uri? = null
-    internal var musicName = ""
-    internal var musicDurMs = 0L
-    internal var musicVol = 100
-    internal var voiceUri: Uri? = null
-    internal var voiceDurMs = 0L
-    internal var voiceVol = 100
-    internal var muteOriginal = false
-    internal var aspectIdx = 0
-    internal var qualityIdx = 0
-    internal var fitIdx = 0
-    internal var fadeInIdx = 0
-    internal var fadeOutIdx = 0
-    internal var transType = 0
-    internal var transIdx = 1
+    internal var musicUri by state::musicUri
+    internal var musicName by state::musicName
+    internal var musicDurMs by state::musicDurMs
+    internal var musicVol by state::musicVol
+    internal var voiceUri by state::voiceUri
+    internal var voiceDurMs by state::voiceDurMs
+    internal var voiceVol by state::voiceVol
+    internal var muteOriginal by state::muteOriginal
+    internal var aspectIdx by state::aspectIdx
+    internal var qualityIdx by state::qualityIdx
+    internal var fitIdx by state::fitIdx
+    internal var fadeInIdx by state::fadeInIdx
+    internal var fadeOutIdx by state::fadeOutIdx
+    internal var transType by state::transType
+    internal var transIdx by state::transIdx
     internal var codecIdx = 0
     internal var bitrateIdx = 1
-    internal var projectName = "Meu projeto"
+    internal var projectName by state::projectName
     internal var exporting = false
     internal var extractingAudio = false
     internal var analysingSilence = false
@@ -685,35 +686,9 @@ class MainActivity : ComponentActivity() {
 
     // ------------------------------------------------------------------ desfazer / refazer
 
-    internal fun snapshot() = Snapshot(
-        clips.map { it.copy() }, texts.toList(), selected,
-        musicUri, musicName, musicDurMs, musicVol,
-        voiceUri, voiceDurMs, voiceVol,
-        muteOriginal, aspectIdx, qualityIdx, fitIdx, fadeInIdx, fadeOutIdx, transType, transIdx
-    )
+    internal fun snapshot() = state.snapshot()
 
-    internal fun restore(s: Snapshot) {
-        clips.clear()
-        clips.addAll(s.clips.map { it.copy() })
-        texts.clear()
-        texts.addAll(s.texts)
-        selected = s.selected.coerceIn(0, (clips.size - 1).coerceAtLeast(0))
-        musicUri = s.musicUri
-        musicName = s.musicName
-        musicDurMs = s.musicDurMs
-        musicVol = s.musicVol
-        voiceUri = s.voiceUri
-        voiceDurMs = s.voiceDurMs
-        voiceVol = s.voiceVol
-        muteOriginal = s.muteOriginal
-        aspectIdx = s.aspectIdx
-        qualityIdx = s.qualityIdx
-        fitIdx = s.fitIdx
-        fadeInIdx = s.fadeInIdx
-        fadeOutIdx = s.fadeOutIdx
-        transType = s.transType
-        transIdx = s.transIdx
-    }
+    internal fun restore(s: Snapshot) = state.restore(s)
 
     internal fun pushUndo() {
         undoStack.add(snapshot())
@@ -773,26 +748,8 @@ class MainActivity : ComponentActivity() {
     /** Zera o que está na memória (não mexe em arquivos). */
     internal fun resetState() {
         player.pause()
-        clips.clear()
-        texts.clear()
-        selected = 0
+        state.reset()
         clipPicked = false
-        musicUri = null
-        musicName = ""
-        musicDurMs = 0L
-        musicVol = 100
-        voiceUri = null
-        voiceDurMs = 0L
-        voiceVol = 100
-        muteOriginal = false
-        aspectIdx = 0
-        qualityIdx = 0
-        fitIdx = 0
-        fadeInIdx = 0
-        fadeOutIdx = 0
-        transType = 0
-        transIdx = 1
-        projectName = "Meu projeto"
         nameTv.text = projectName
         undoStack.clear()
         redoStack.clear()
@@ -854,7 +811,7 @@ class MainActivity : ComponentActivity() {
 
     // ------------------------------------------------------------------ edição da linha do tempo
 
-    internal fun totalMs(): Long = clips.sumOf { it.effMs }
+    internal fun totalMs(): Long = state.totalMs()
 
     internal fun updateSeekMax() {
         if (clips.isEmpty()) {
