@@ -1,17 +1,25 @@
 package com.editorvideo
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RadialGradient
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.os.SystemClock
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
+import android.view.ViewConfiguration
+import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sin
 import kotlin.random.Random
 
@@ -150,5 +158,252 @@ class LiquidProgress(context: Context) : View(context) {
             canvas.restore()
         }
         if (visibility == VISIBLE) postInvalidateOnAnimation()
+    }
+}
+
+
+/** Linha do tempo contínua: a agulha fica no centro e a trilha desliza por baixo (estilo KineMaster). */
+class TimelineView(context: Context) : View(context) {
+
+    class ClipInfo(val effMs: Long, val thumb: Bitmap?, val label: String)
+    class Bar(val startMs: Long, val endMs: Long, val label: String, val color: Int)
+
+    var clips: List<ClipInfo> = emptyList()
+    var bars: List<Bar> = emptyList()
+    var selected = -1
+    var musicMs = 0L
+    var voiceMs = 0L
+    var transOn = false
+    var posMs = 0L
+        set(v) {
+            field = v
+            invalidate()
+        }
+
+    var onSeek: (Long) -> Unit = {}
+    var onDrag: (Boolean) -> Unit = {}
+    var onSelect: (Int) -> Unit = {}
+
+    private val d = resources.displayMetrics.density
+    private var pxPerSec = 40f * d
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val bmpPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFFFFFFF.toInt()
+        textSize = 10f * d
+    }
+    private val rect = RectF()
+    private val dst = RectF()
+    private val clipPath = Path()
+    private val slop = ViewConfiguration.get(context).scaledTouchSlop
+    private var downX = 0f
+    private var downPos = 0L
+    private var moved = false
+
+    private val scaler = ScaleGestureDetector(
+        context,
+        object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                pxPerSec = (pxPerSec * detector.scaleFactor).coerceIn(8f * d, 220f * d)
+                invalidate()
+                return true
+            }
+        }
+    )
+
+    fun total(): Long = clips.sumOf { it.effMs }
+
+    private fun fmtRuler(ms: Long): String {
+        val s = ms / 1000
+        val m = s / 60
+        val r = s % 60
+        return if (ms % 1000L != 0L) "%d:%02d.5".format(m, r) else "%d:%02d".format(m, r)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        if (w <= 0f || h <= 0f) return
+        val ppm = pxPerSec / 1000f
+        val cx = w / 2f
+
+        paint.style = Paint.Style.FILL
+        paint.color = 0x14FFFFFF
+        rect.set(0f, 0f, w, h)
+        canvas.drawRoundRect(rect, 16f * d, 16f * d, paint)
+
+        val rulerH = h * 0.13f
+        val vTop = rulerH + 2f * d
+        val vBot = vTop + h * 0.42f
+        val barTop = vBot + 3f * d
+        val laneH = h * 0.09f
+        val audioTop = barTop + laneH * 2f + 5f * d
+        val audioH = h * 0.065f
+
+        // régua
+        val steps = longArrayOf(500L, 1000L, 2000L, 5000L, 10000L, 30000L, 60000L)
+        var step = steps[steps.size - 1]
+        for (s in steps) {
+            if (s * ppm >= 56f * d) {
+                step = s
+                break
+            }
+        }
+        val firstMs = max(0L, (floor(((posMs - cx / ppm) / step).toDouble()) * step).toLong())
+        val lastMs = posMs + (cx / ppm).toLong() + step
+        paint.color = 0x66FFFFFF
+        paint.strokeWidth = 1f * d
+        txt.color = 0xFF8FA3BF.toInt()
+        var m = firstMs
+        while (m <= lastMs) {
+            val x = cx + (m - posMs) * ppm
+            canvas.drawLine(x, rulerH - 5f * d, x, rulerH, paint)
+            canvas.drawText(fmtRuler(m), x + 3f * d, rulerH - 6f * d, txt)
+            m += step
+        }
+        txt.color = 0xFFFFFFFF.toInt()
+
+        // clipes de vídeo
+        var start = 0L
+        for ((i, ci) in clips.withIndex()) {
+            val x0 = cx + (start - posMs) * ppm
+            val x1 = cx + (start + ci.effMs - posMs) * ppm
+            start += ci.effMs
+            if (x1 >= 0f && x0 <= w) {
+                rect.set(x0 + 1f, vTop, x1 - 1f, vBot)
+                clipPath.reset()
+                clipPath.addRoundRect(rect, 8f * d, 8f * d, Path.Direction.CW)
+                canvas.save()
+                canvas.clipPath(clipPath)
+                paint.style = Paint.Style.FILL
+                paint.color = 0xFF162844.toInt()
+                canvas.drawRect(rect, paint)
+                val th = ci.thumb
+                if (th != null) {
+                    val tileW = (vBot - vTop) * th.width / th.height
+                    var tx = x0
+                    if (tx < 0f) tx += floor((-tx / tileW).toDouble()).toFloat() * tileW
+                    val limit = min(x1, w)
+                    while (tx < limit) {
+                        dst.set(tx, vTop, tx + tileW, vBot)
+                        canvas.drawBitmap(th, null, dst, bmpPaint)
+                        tx += tileW
+                    }
+                }
+                paint.color = 0x88000000.toInt()
+                canvas.drawRect(rect.left, vBot - 14f * d, rect.right, vBot, paint)
+                canvas.drawText(ci.label, max(x0, 0f) + 6f * d, vBot - 4f * d, txt)
+                canvas.restore()
+                if (i == selected) {
+                    paint.style = Paint.Style.STROKE
+                    paint.strokeWidth = 2.5f * d
+                    paint.color = 0xFF2DE2C8.toInt()
+                    canvas.drawRoundRect(rect, 8f * d, 8f * d, paint)
+                    paint.style = Paint.Style.FILL
+                }
+            }
+            if (transOn && i < clips.size - 1 && x1 >= -20f && x1 <= w + 20f) {
+                val cy = (vTop + vBot) / 2f
+                paint.style = Paint.Style.FILL
+                paint.color = 0xF0FFFFFF.toInt()
+                canvas.drawCircle(x1, cy, 9f * d, paint)
+                paint.color = 0xFF2DE2C8.toInt()
+                canvas.drawCircle(x1, cy, 4f * d, paint)
+            }
+        }
+
+        // textos e adesivos (duas faixas)
+        val laneEnd = longArrayOf(-1L, -1L)
+        for (b in bars.sortedBy { it.startMs }) {
+            val lane = if (laneEnd[0] <= b.startMs) 0 else 1
+            laneEnd[lane] = b.endMs
+            val x0 = cx + (b.startMs - posMs) * ppm
+            val x1 = max(cx + (b.endMs - posMs) * ppm, x0 + 8f * d)
+            if (x1 < 0f || x0 > w) continue
+            val y = barTop + lane * (laneH + 2f * d)
+            rect.set(x0, y, x1, y + laneH)
+            paint.style = Paint.Style.FILL
+            paint.color = b.color
+            canvas.drawRoundRect(rect, 5f * d, 5f * d, paint)
+            canvas.save()
+            canvas.clipRect(rect)
+            txt.textSize = 9f * d
+            canvas.drawText(b.label, max(x0, 0f) + 4f * d, y + laneH - 3f * d, txt)
+            txt.textSize = 10f * d
+            canvas.restore()
+        }
+
+        // música e narração
+        if (musicMs > 0L) {
+            rect.set(cx - posMs * ppm, audioTop, cx + (musicMs - posMs) * ppm, audioTop + audioH)
+            paint.style = Paint.Style.FILL
+            paint.color = 0xCC2BB673.toInt()
+            canvas.drawRoundRect(rect, 4f * d, 4f * d, paint)
+        }
+        if (voiceMs > 0L) {
+            val y = audioTop + audioH + 2f * d
+            rect.set(cx - posMs * ppm, y, cx + (voiceMs - posMs) * ppm, y + audioH)
+            paint.style = Paint.Style.FILL
+            paint.color = 0xCCFF5C7A.toInt()
+            canvas.drawRoundRect(rect, 4f * d, 4f * d, paint)
+        }
+
+        // agulha
+        paint.style = Paint.Style.FILL
+        paint.color = 0x552DE2C8
+        canvas.drawRect(cx - 3f * d, 0f, cx + 3f * d, h, paint)
+        paint.color = 0xFFFFFFFF.toInt()
+        canvas.drawRect(cx - 0.9f * d, 0f, cx + 0.9f * d, h, paint)
+        canvas.drawCircle(cx, 3f * d, 4f * d, paint)
+    }
+
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        scaler.onTouchEvent(e)
+        if (scaler.isInProgress) {
+            moved = true
+            return true
+        }
+        val ppm = pxPerSec / 1000f
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                parent?.requestDisallowInterceptTouchEvent(true)
+                downX = e.x
+                downPos = posMs
+                moved = false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = e.x - downX
+                if (!moved && abs(dx) > slop) {
+                    moved = true
+                    onDrag(true)
+                }
+                if (moved && e.pointerCount == 1) {
+                    val t = (downPos - dx / ppm).toLong().coerceIn(0L, total())
+                    posMs = t
+                    onSeek(t)
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                if (!moved) {
+                    val t = posMs + ((e.x - width / 2f) / ppm).toLong()
+                    var acc = 0L
+                    for ((i, ci) in clips.withIndex()) {
+                        if (t >= acc && t < acc + ci.effMs) {
+                            onSelect(i)
+                            break
+                        }
+                        acc += ci.effMs
+                    }
+                } else {
+                    onDrag(false)
+                }
+                parent?.requestDisallowInterceptTouchEvent(false)
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                if (moved) onDrag(false)
+                parent?.requestDisallowInterceptTouchEvent(false)
+            }
+        }
+        return true
     }
 }

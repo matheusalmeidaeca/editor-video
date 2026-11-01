@@ -8,6 +8,7 @@ import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.LinearGradient
@@ -79,6 +80,7 @@ import androidx.media3.effect.TextOverlay
 import androidx.media3.effect.TextureOverlay
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.transformer.Composition
+import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
@@ -86,11 +88,13 @@ import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
+import androidx.media3.transformer.VideoEncoderSettings
 import com.google.common.collect.ImmutableList
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Executors
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -187,6 +191,28 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Transição entre clipes: a tela vai à cor escolhida no corte e volta. */
+    private class TransitionOverlay(
+        val bmp: Bitmap,
+        val bounds: List<Long>,
+        val halfMs: Long
+    ) : BitmapOverlay() {
+        override fun getBitmap(presentationTimeUs: Long): Bitmap = bmp
+
+        override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings {
+            val ms = presentationTimeUs / 1000
+            var a = 0f
+            for (b in bounds) {
+                val dist = abs(ms - b)
+                if (dist < halfMs) a = max(a, 1f - dist.toFloat() / halfMs)
+            }
+            return OverlaySettings.Builder()
+                .setScale(1.02f, 1.02f)
+                .setAlphaScale(a.coerceIn(0f, 1f))
+                .build()
+        }
+    }
+
     private class Snapshot(
         val clips: List<Clip>,
         val texts: List<TextItem>,
@@ -203,7 +229,9 @@ class MainActivity : ComponentActivity() {
         val qualityIdx: Int,
         val fitIdx: Int,
         val fadeInIdx: Int,
-        val fadeOutIdx: Int
+        val fadeOutIdx: Int,
+        val transType: Int,
+        val transIdx: Int
     )
 
     // ------------------------------------------------------------------ estado
@@ -225,6 +253,11 @@ class MainActivity : ComponentActivity() {
     private var fitIdx = 0
     private var fadeInIdx = 0
     private var fadeOutIdx = 0
+    private var transType = 0
+    private var transIdx = 1
+    private var codecIdx = 0
+    private var bitrateIdx = 1
+    private var projectName = "Meu projeto"
     private var exporting = false
     private var dragging = false
     private var recording = false
@@ -234,8 +267,11 @@ class MainActivity : ComponentActivity() {
     private val undoStack = mutableListOf<Snapshot>()
     private val redoStack = mutableListOf<Snapshot>()
 
-    private val aspectNames = listOf("Original", "9:16", "16:9", "1:1", "4:5")
-    private val aspectRatios = listOf<Float?>(null, 9f / 16f, 16f / 9f, 1f, 4f / 5f)
+    private val aspectNames = listOf("Original", "16:9", "9:16", "1:1", "4:3", "3:4", "4:5", "2.35:1")
+    private val aspectRatios = listOf<Float?>(null, 16f / 9f, 9f / 16f, 1f, 4f / 3f, 3f / 4f, 4f / 5f, 2.35f)
+    private val transNames = listOf("Nenhuma", "Fade no preto", "Fade no branco")
+    private val transDur = listOf(500L, 1000L, 1500L, 2000L)
+    private val transDurNames = listOf("0,5 s", "1 s", "1,5 s", "2 s")
     private val qualityNames = listOf("Original", "1080p", "720p", "480p")
     private val qualityShort = listOf<Int?>(null, 1080, 720, 480)
     private val fitNames = listOf("Preencher (corta bordas)", "Ajustar (barras pretas)")
@@ -247,8 +283,8 @@ class MainActivity : ComponentActivity() {
     )
     private val kenNames = listOf("Nenhum", "Aproximar", "Afastar", "Panorâmica →", "Panorâmica ←")
     private val speeds = listOf(0.25f, 0.5f, 0.75f, 1f, 1.5f, 2f, 3f, 4f)
-    private val toolNames = listOf("Cortar", "Velocidade", "Filtros", "Transformar", "Texto", "Adesivos", "Áudio", "Formato")
-    private val toolIcons = listOf("✂️", "⏩", "🎨", "🔄", "🔤", "😀", "🔊", "📐")
+    private val toolNames = listOf("Cortar", "Velocidade", "Filtros", "Transformar", "Transição", "Texto", "Adesivos", "Mixer", "Formato")
+    private val toolIcons = listOf("✂️", "⏩", "🎨", "🔄", "🔀", "🔤", "😀", "🔊", "📐")
     private val posNames = listOf("Topo", "Centro", "Base")
     private val posXNames = listOf("Esquerda", "Centro", "Direita")
     private val posY = listOf(0.8f, 0f, -0.8f)
@@ -281,8 +317,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var undoBtn: Button
     private lateinit var redoBtn: Button
     private lateinit var timeTv: TextView
-    private lateinit var timeSeek: SeekBar
-    private lateinit var timelineBox: LinearLayout
+    private lateinit var timeline: TimelineView
+    private lateinit var nameTv: TextView
+    private lateinit var rootFrame: FrameLayout
     private lateinit var toolsRow: LinearLayout
     private lateinit var panel: LinearLayout
     private lateinit var exportBtn: Button
@@ -304,7 +341,7 @@ class MainActivity : ComponentActivity() {
             if (clips.isNotEmpty() && player.mediaItemCount == clips.size) {
                 val pos = currentTimelineMs()
                 if (!dragging) {
-                    timeSeek.progress = pos.toInt().coerceAtMost(timeSeek.max)
+                    if (timeline.posMs != pos) timeline.posMs = pos
                     timeTv.text = "${fmt(pos)} / ${fmt(totalMs())}"
                 }
                 refreshOverlay(pos)
@@ -318,7 +355,7 @@ class MainActivity : ComponentActivity() {
                     statusTv.text = "Exportando… ${progressHolder.progress}%"
                 }
             }
-            handler.postDelayed(this, 100)
+            handler.postDelayed(this, 40)
         }
     }
 
@@ -414,6 +451,12 @@ class MainActivity : ComponentActivity() {
         buildUi()
         handler.post(ticker)
         loadProject()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        pulse?.cancel()
+        buildUi()
     }
 
     override fun onStop() {
@@ -640,12 +683,14 @@ class MainActivity : ComponentActivity() {
     // ------------------------------------------------------------------ interface
 
     private fun buildUi() {
+        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val frame = FrameLayout(this)
+        rootFrame = frame
         frame.addView(LiquidBackground(this), FrameLayout.LayoutParams(MATCH, MATCH))
 
-        val root = vbox().apply { setPadding(dp(14), dp(34), dp(14), dp(40)) }
-
+        // barra superior
         val top = hbox()
+        val titleBox = vbox()
         val title = tv("Editor de Vídeo", 18f).apply {
             setTypeface(typeface, Typeface.BOLD)
             maxLines = 1
@@ -655,24 +700,29 @@ class MainActivity : ComponentActivity() {
             0f, 0f, dp(170).toFloat(), 0f,
             intArrayOf(Color.WHITE, cAccent), null, Shader.TileMode.CLAMP
         )
-        top.addView(title, lpm(0, WRAP, weight = 1f))
+        nameTv = tv(projectName, 11f, cGrey).apply {
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            setOnClickListener { projectDialog(false) }
+        }
+        titleBox.addView(title)
+        titleBox.addView(nameTv)
+        top.addView(titleBox, lpm(0, WRAP, weight = 1f))
         undoBtn = iconBtn("↩") { undo() }
         redoBtn = iconBtn("↪") { redo() }
         top.addView(undoBtn, lpm(dp(42), dp(42), l = 4))
         top.addView(redoBtn, lpm(dp(42), dp(42), l = 4))
-        top.addView(iconBtn("+") { pickVideos.launch(arrayOf("video/*")) }, lpm(dp(42), dp(42), l = 4))
-        exportBtn = btn("Exportar") { if (exporting) cancelExport() else exportar() }
+        top.addView(iconBtn("+") { showRadialMenu() }, lpm(dp(42), dp(42), l = 4))
+        exportBtn = btn("Exportar") { if (exporting) cancelExport() else exportDialog() }
         exportBtn.background = gradient(21)
         exportBtn.setTextColor(cNavy)
         exportBtn.typeface = Typeface.DEFAULT_BOLD
         top.addView(exportBtn, lpm(WRAP, dp(42), l = 6))
-        root.addView(top)
 
-        progressBar = LiquidProgress(this).apply { visibility = View.GONE }
-        root.addView(progressBar, lpm(MATCH, dp(10), t = 8))
+        progressBar = LiquidProgress(this).apply { visibility = if (exporting) View.VISIBLE else View.GONE }
         statusTv = tv("", 12f, cGrey)
-        root.addView(statusTv)
 
+        // prévia
         previewBox = FrameLayout(this).apply { background = glass(22, Color.BLACK, 0x33FFFFFF) }
         surface = SurfaceView(this)
         previewBox.addView(surface, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -687,12 +737,12 @@ class MainActivity : ComponentActivity() {
             setTextColor(cNavy)
             setTypeface(typeface, Typeface.BOLD)
             background = gradientOval()
-            setOnClickListener { pickVideos.launch(arrayOf("video/*")) }
+            setOnClickListener { projectDialog(true) }
         }
         press(plus)
         emptyState.addView(plus, lpm(dp(84), dp(84)))
-        emptyState.addView(tv("Toque para adicionar vídeos", 15f), lpm(WRAP, WRAP, t = 12))
-        emptyState.addView(tv("Corte, filtros, textos, adesivos e música", 12f, cGrey), lpm(WRAP, WRAP, t = 2))
+        emptyState.addView(tv("Toque para criar um projeto", 15f), lpm(WRAP, WRAP, t = 12))
+        emptyState.addView(tv("Nome, proporção e seus vídeos", 12f, cGrey), lpm(WRAP, WRAP, t = 2))
         previewBox.addView(emptyState, FrameLayout.LayoutParams(MATCH, MATCH))
         pulse = ObjectAnimator.ofPropertyValuesHolder(
             plus,
@@ -705,93 +755,269 @@ class MainActivity : ComponentActivity() {
             interpolator = AccelerateDecelerateInterpolator()
             start()
         }
-        root.addView(previewBox, lpm(MATCH, dp(240), t = 10))
         player.setVideoSurfaceView(surface)
 
+        // transporte
         val transport = hbox()
         playBtn = btn("▶") { togglePlay() }
         playBtn.background = gradientOval()
         playBtn.setTextColor(cNavy)
         playBtn.setPadding(0, 0, 0, 0)
         transport.addView(playBtn, lpm(dp(46), dp(46)))
-        timeSeek = SeekBar(this).apply {
-            max = 1
-            styleSeek(this)
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar, p: Int, fromUser: Boolean) {
-                    if (fromUser) {
-                        seekToTimeline(p.toLong())
-                        timeTv.text = "${fmt(p.toLong())} / ${fmt(totalMs())}"
-                    }
-                }
+        timeTv = tv("0:00.0 / 0:00.0", 13f, cGrey)
+        transport.addView(timeTv, lpm(0, WRAP, l = 12, weight = 1f))
 
-                override fun onStartTrackingTouch(s: SeekBar) {
-                    dragging = true
-                }
-
-                override fun onStopTrackingTouch(s: SeekBar) {
-                    dragging = false
-                    if (clips.isNotEmpty()) selectOnly(player.currentMediaItemIndex)
-                }
-            })
+        // linha do tempo
+        timeline = TimelineView(this).apply {
+            onSeek = { ms ->
+                seekToTimeline(ms)
+                timeTv.text = "${fmt(ms)} / ${fmt(totalMs())}"
+            }
+            onDrag = { on ->
+                dragging = on
+                if (!on && clips.isNotEmpty()) selectOnly(player.currentMediaItemIndex)
+            }
+            onSelect = { i -> selectClip(i) }
         }
-        transport.addView(timeSeek, lpm(0, WRAP, l = 8, weight = 1f))
-        root.addView(transport, lpm(MATCH, WRAP, t = 10))
-        timeTv = tv("0:00.0 / 0:00.0", 12f, cGrey)
-        root.addView(timeTv, lpm(WRAP, WRAP, l = 54))
-
-        timelineBox = hbox().apply {
-            clipChildren = false
-            clipToPadding = false
-        }
-        root.addView(
-            HorizontalScrollView(this).apply {
-                isHorizontalScrollBarEnabled = false
-                clipChildren = false
-                clipToPadding = false
-                setPadding(dp(4), dp(8), dp(4), dp(12))
-                addView(timelineBox)
-            },
-            lpm(MATCH, WRAP, t = 4)
-        )
 
         val actions = hbox()
         actions.addView(btn("✂ Dividir") { splitClip() }, lpm(WRAP, WRAP, r = 6))
+        actions.addView(btn("◧ Cortar à esquerda") { cutAtPlayhead(true) }, lpm(WRAP, WRAP, r = 6))
+        actions.addView(btn("Cortar à direita ◨") { cutAtPlayhead(false) }, lpm(WRAP, WRAP, r = 6))
         actions.addView(btn("⧉ Duplicar") { dupClip() }, lpm(WRAP, WRAP, r = 6))
         actions.addView(btn("🗑 Excluir") { delClip() }, lpm(WRAP, WRAP, r = 6))
         actions.addView(btn("◀ Mover") { moveClip(-1) }, lpm(WRAP, WRAP, r = 6))
         actions.addView(btn("Mover ▶") { moveClip(1) }, lpm(WRAP, WRAP, r = 6))
-        root.addView(hscroll(actions), lpm(MATCH, WRAP, t = 2))
 
         toolsRow = hbox()
-        root.addView(hscroll(toolsRow), lpm(MATCH, WRAP, t = 14))
-
         panel = vbox().apply {
             background = glass(22, 0x14FFFFFF, 0x26FFFFFF)
             setPadding(dp(16), dp(14), dp(16), dp(16))
         }
-        root.addView(panel, lpm(MATCH, WRAP, t = 12))
 
-        val scroll = ScrollView(this).apply {
-            isVerticalScrollBarEnabled = false
-            clipToPadding = false
-            addView(root)
+        val animRoot: ViewGroup
+        if (!landscape) {
+            val root = vbox().apply { setPadding(dp(14), dp(34), dp(14), dp(40)) }
+            root.addView(top)
+            root.addView(progressBar, lpm(MATCH, dp(10), t = 8))
+            root.addView(statusTv)
+            val ph = (resources.displayMetrics.heightPixels * 0.34f).toInt().coerceIn(dp(190), dp(340))
+            root.addView(previewBox, lpm(MATCH, ph, t = 10))
+            root.addView(transport, lpm(MATCH, WRAP, t = 10))
+            root.addView(timeline, lpm(MATCH, dp(160), t = 8))
+            root.addView(hscroll(actions), lpm(MATCH, WRAP, t = 8))
+            root.addView(hscroll(toolsRow), lpm(MATCH, WRAP, t = 14))
+            root.addView(panel, lpm(MATCH, WRAP, t = 12))
+            val scroll = ScrollView(this).apply {
+                isVerticalScrollBarEnabled = false
+                clipToPadding = false
+                addView(root)
+            }
+            frame.addView(scroll, FrameLayout.LayoutParams(MATCH, MATCH))
+            animRoot = root
+        } else {
+            val outer = vbox().apply { setPadding(dp(14), dp(12), dp(14), dp(8)) }
+            outer.addView(top)
+            outer.addView(progressBar, lpm(MATCH, dp(8), t = 4))
+            outer.addView(statusTv)
+            val split = hbox().apply { gravity = Gravity.TOP }
+            val left = vbox()
+            left.addView(previewBox, lpm(MATCH, 0, weight = 1f))
+            left.addView(transport, lpm(MATCH, WRAP, t = 6))
+            left.addView(timeline, lpm(MATCH, dp(112), t = 6))
+            val right = vbox().apply { setPadding(0, 0, 0, dp(16)) }
+            right.addView(hscroll(actions))
+            right.addView(hscroll(toolsRow), lpm(MATCH, WRAP, t = 8))
+            right.addView(panel, lpm(MATCH, WRAP, t = 8))
+            val rs = ScrollView(this).apply {
+                isVerticalScrollBarEnabled = false
+                addView(right)
+            }
+            split.addView(left, lpm(0, MATCH, weight = 1.15f))
+            split.addView(rs, lpm(0, MATCH, l = 12, weight = 1f))
+            outer.addView(split, lpm(MATCH, 0, t = 8, weight = 1f))
+            frame.addView(outer, FrameLayout.LayoutParams(MATCH, MATCH))
+            animRoot = outer
         }
-        frame.addView(scroll, FrameLayout.LayoutParams(MATCH, MATCH))
         setContentView(frame)
 
         buildToolTabs()
         refreshTimeline()
-        showTool(0, false)
+        showTool(currentTool, false)
         updateUndoButtons()
+        updateSeekMax()
+        fitSurface(player.videoSize)
+        exportBtn.text = if (exporting) "Cancelar" else "Exportar"
 
-        for (k in 0 until root.childCount) {
-            val ch = root.getChildAt(k)
+        for (k in 0 until animRoot.childCount) {
+            val ch = animRoot.getChildAt(k)
             ch.alpha = 0f
             ch.translationY = dp(18).toFloat()
             ch.animate().alpha(1f).translationY(0f).setStartDelay(k * 70L).setDuration(420)
                 .setInterpolator(DecelerateInterpolator()).start()
         }
+    }
+
+    private fun chipGroup(labels: List<String>, current: Int, onPick: (Int) -> Unit): View {
+        val r = hbox()
+        val all = ArrayList<Button>()
+        labels.forEachIndexed { i, n ->
+            val b = btn(n) {
+                all.forEachIndexed { k, bb -> styleBtn(bb, k == i) }
+                onPick(i)
+            }
+            styleBtn(b, i == current)
+            all.add(b)
+            r.addView(b, lpm(WRAP, WRAP, t = 6, r = 6))
+        }
+        return hscroll(r)
+    }
+
+    private fun editField(h: String, value: String) = EditText(this).apply {
+        hint = h
+        setText(value)
+        setTextColor(cText)
+        setHintTextColor(cGrey)
+        backgroundTintList = ColorStateList.valueOf(cAccent)
+    }
+
+    private fun projectDialog(isNew: Boolean) {
+        var asp = aspectIdx
+        val et = editField("Nome do projeto", projectName)
+        val box = vbox().apply { setPadding(dp(20), dp(10), dp(20), 0) }
+        box.addView(et)
+        box.addView(section("Proporção da tela"), lpm(WRAP, WRAP, t = 14))
+        box.addView(chipGroup(aspectNames, asp) { asp = it })
+        box.addView(note("16:9 YouTube · 9:16 Reels/Shorts/TikTok · 1:1 e 4:5 Instagram"), lpm(MATCH, WRAP, t = 8))
+        showStyled(
+            AlertDialog.Builder(this)
+                .setTitle(if (isNew) "Novo projeto" else "Projeto")
+                .setView(ScrollView(this).apply { addView(box) })
+                .setPositiveButton(if (isNew) "Criar" else "OK") { _, _ ->
+                    val n = et.text.toString().trim()
+                    if (isNew && (clips.isNotEmpty() || texts.isNotEmpty())) newProject()
+                    if (asp != aspectIdx) pushUndo()
+                    aspectIdx = asp
+                    projectName = if (n.isEmpty()) "Meu projeto" else n
+                    nameTv.text = projectName
+                    scheduleSave()
+                    showTool(currentTool)
+                    if (isNew) pickVideos.launch(arrayOf("video/*"))
+                }
+                .setNegativeButton("Cancelar", null)
+        )
+    }
+
+    private fun videoBitrate(w: Int, h: Int): Int {
+        val bpp = listOf(0.05f, 0.08f, 0.13f)[bitrateIdx]
+        val f = if (codecIdx == 1) 0.7f else 1f
+        return (w * h * 30f * bpp * f).toInt().coerceIn(800_000, 40_000_000)
+    }
+
+    private fun exportDialog() {
+        if (clips.isEmpty()) {
+            toast("Adicione vídeos primeiro")
+            return
+        }
+        val box = vbox().apply { setPadding(dp(20), dp(8), dp(20), 0) }
+        val info = tv("", 12f, cGrey)
+        fun upd() {
+            val (ow, oh) = outputSize()
+            val br = videoBitrate(ow, oh)
+            val mb = br / 8.0 * (totalMs() / 1000.0) / 1_000_000.0
+            info.text = "${ow}×${oh} · ${"%.1f".format(br / 1_000_000.0)} Mbps · cerca de ${mb.roundToInt().coerceAtLeast(1)} MB"
+        }
+        box.addView(section("Formato"))
+        box.addView(chipGroup(listOf("Compatível (H.264)", "Menor arquivo (HEVC)"), codecIdx) { codecIdx = it; upd() })
+        box.addView(section("Resolução"), lpm(WRAP, WRAP, t = 12))
+        box.addView(chipGroup(qualityNames, qualityIdx) { qualityIdx = it; upd() })
+        box.addView(section("Qualidade"), lpm(WRAP, WRAP, t = 12))
+        box.addView(chipGroup(listOf("Baixa", "Média", "Alta"), bitrateIdx) { bitrateIdx = it; upd() })
+        box.addView(info, lpm(WRAP, WRAP, t = 14))
+        upd()
+        showStyled(
+            AlertDialog.Builder(this)
+                .setTitle("Salvar e compartilhar")
+                .setView(ScrollView(this).apply { addView(box) })
+                .setPositiveButton("Salvar como vídeo") { _, _ -> exportar() }
+                .setNegativeButton("Cancelar", null)
+        )
+    }
+
+    private fun showRadialMenu() {
+        val scrim = FrameLayout(this).apply {
+            setBackgroundColor(Color.parseColor("#D9050B18"))
+            isClickable = true
+            alpha = 0f
+        }
+        fun close() {
+            scrim.animate().alpha(0f).setDuration(160).withEndAction { rootFrame.removeView(scrim) }.start()
+        }
+        scrim.setOnClickListener { close() }
+        val items: List<Triple<String, String, () -> Unit>> = listOf(
+            Triple("🎞️", "Vídeo", { pickVideos.launch(arrayOf("video/*")) }),
+            Triple("🔤", "Texto", {
+                currentTool = 5
+                buildToolTabs()
+                showTool(5, true)
+                itemDialog(-1, false)
+            }),
+            Triple("🎵", "Áudio", { pickMusic.launch(arrayOf("audio/*")) }),
+            Triple("🎙️", "REC", { requestRecord() })
+        )
+        val radius = dp(100).toFloat()
+        items.forEachIndexed { i, it3 ->
+            val ang = Math.toRadians(-90.0 + i * 90.0)
+            val dx = (radius * Math.cos(ang)).toFloat()
+            val dy = (radius * Math.sin(ang)).toFloat()
+            val b = vbox().apply {
+                gravity = Gravity.CENTER
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(0x33FFFFFF)
+                    setStroke(dp(1), cAccent)
+                }
+                scaleX = 0f
+                scaleY = 0f
+                setOnClickListener {
+                    close()
+                    it3.third()
+                }
+            }
+            b.addView(tv(it3.first, 26f).apply { gravity = Gravity.CENTER })
+            b.addView(tv(it3.second, 11f).apply { gravity = Gravity.CENTER })
+            scrim.addView(b, FrameLayout.LayoutParams(dp(78), dp(78), Gravity.CENTER))
+            b.animate().translationX(dx).translationY(dy).scaleX(1f).scaleY(1f)
+                .setStartDelay(i * 45L).setDuration(380)
+                .setInterpolator(OvershootInterpolator(1.6f)).start()
+        }
+        val closeBtn = TextView(this).apply {
+            text = "✕"
+            textSize = 20f
+            gravity = Gravity.CENTER
+            setTextColor(cNavy)
+            background = gradientOval()
+            setOnClickListener { close() }
+        }
+        scrim.addView(closeBtn, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.CENTER))
+        rootFrame.addView(scrim, FrameLayout.LayoutParams(MATCH, MATCH))
+        scrim.animate().alpha(1f).setDuration(160).start()
+    }
+
+    private fun cutAtPlayhead(keepRight: Boolean) {
+        if (clips.isEmpty() || player.mediaItemCount != clips.size) return
+        val idx = player.currentMediaItemIndex.coerceIn(0, clips.size - 1)
+        val c = clips[idx]
+        val at = c.startMs + player.currentPosition
+        if (at < c.startMs + 300L || at > c.endMs - 300L) {
+            toast("Posicione a agulha dentro do clipe, longe das pontas.")
+            return
+        }
+        pushUndo()
+        selected = idx
+        if (keepRight) c.startMs = at else c.endMs = at
+        afterEdit(idx, 0L)
+        loadThumb(c)
     }
 
     private fun buildToolTabs() {
@@ -818,15 +1044,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showTool(i: Int, animate: Boolean = false) {
+        refreshTimeline()
         panel.removeAllViews()
         val v = when (i) {
             0 -> panelTrim()
             1 -> panelSpeed()
             2 -> panelFilters()
             3 -> panelTransform()
-            4 -> panelText(false)
-            5 -> panelText(true)
-            6 -> panelAudio()
+            4 -> panelTransition()
+            5 -> panelText(false)
+            6 -> panelText(true)
+            7 -> panelAudio()
             else -> panelFormat()
         }
         panel.addView(v)
@@ -839,54 +1067,30 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun refreshTimeline() {
-        timelineBox.removeAllViews()
         emptyState.visibility = if (clips.isEmpty()) View.VISIBLE else View.GONE
-        if (clips.isEmpty()) {
-            timelineBox.addView(tv("Sua linha do tempo aparece aqui", 13f, cGrey))
-            return
+        timeline.clips = clips.mapIndexed { i, c ->
+            val extra = (if (c.speed != 1f) " ${fmtSpeed(c.speed)}x" else "") + (if (c.filter != 0) " 🎨" else "")
+            TimelineView.ClipInfo(c.effMs, c.thumb, "${i + 1} · ${fmt(c.effMs)}$extra")
         }
-        clips.forEachIndexed { i, c ->
-            val on = i == selected
-            val card = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER_HORIZONTAL
-                setPadding(dp(5), dp(5), dp(5), dp(6))
-                background = glass(16, if (on) 0x2600E5C8 else cGlass, if (on) cAccent else cGlassStroke)
-                if (on) {
-                    elevation = dp(6).toFloat()
-                    outlineAmbientShadowColor = cAccent
-                    outlineSpotShadowColor = cAccent
-                }
-                setOnClickListener { selectClip(i) }
-            }
-            press(card)
-            val img = ImageView(this).apply {
-                scaleType = ImageView.ScaleType.CENTER_CROP
-                background = GradientDrawable().apply {
-                    setColor(Color.parseColor("#162844"))
-                    cornerRadius = dp(12).toFloat()
-                }
-                clipToOutline = true
-                val th = c.thumb
-                if (th != null) setImageBitmap(th)
-            }
-            card.addView(img, LinearLayout.LayoutParams(dp(100), dp(64)))
-            var extra = ""
-            if (c.speed != 1f) extra += " · ${fmtSpeed(c.speed)}x"
-            if (c.filter != 0 || c.brightness != 0 || c.contrast != 0 || c.sat != 0) extra += " 🎨"
-            if (c.vol != 100) extra += " 🔊"
-            card.addView(tv("${i + 1} · ${fmt(c.effMs)}$extra", 11f), lpm(WRAP, WRAP, t = 4))
-            timelineBox.addView(card, lpm(WRAP, WRAP, r = 8))
+        timeline.selected = if (clips.isEmpty()) -1 else selected
+        timeline.bars = texts.map {
+            TimelineView.Bar(it.startMs, it.endMs, it.text, if (it.sticker) 0xFFFF6FB5.toInt() else 0xFF7C5CFF.toInt())
         }
+        val tot = totalMs()
+        timeline.musicMs = if (musicUri != null) (if (musicDurMs > 0L) min(musicDurMs, tot) else tot) else 0L
+        timeline.voiceMs = if (voiceUri != null) min(voiceDurMs, tot) else 0L
+        timeline.transOn = transType != 0 && clips.size > 1
+        timeline.invalidate()
     }
 
+    // ------------------------------------------------------------------ desfazer / refazer
     // ------------------------------------------------------------------ desfazer / refazer
 
     private fun snapshot() = Snapshot(
         clips.map { it.copy() }, texts.toList(), selected,
         musicUri, musicName, musicDurMs, musicVol,
         voiceUri, voiceDurMs, voiceVol,
-        muteOriginal, aspectIdx, qualityIdx, fitIdx, fadeInIdx, fadeOutIdx
+        muteOriginal, aspectIdx, qualityIdx, fitIdx, fadeInIdx, fadeOutIdx, transType, transIdx
     )
 
     private fun restore(s: Snapshot) {
@@ -908,6 +1112,8 @@ class MainActivity : ComponentActivity() {
         fitIdx = s.fitIdx
         fadeInIdx = s.fadeInIdx
         fadeOutIdx = s.fadeOutIdx
+        transType = s.transType
+        transIdx = s.transIdx
     }
 
     private fun pushUndo() {
@@ -1263,6 +1469,28 @@ class MainActivity : ComponentActivity() {
         return box
     }
 
+    private fun panelTransition(): View {
+        val box = vbox()
+        box.addView(tv("Transição entre todos os clipes."))
+        box.addView(section("Efeito"), lpm(WRAP, WRAP, t = 8))
+        box.addView(chipRow(transNames, transType) { i ->
+            pushUndo()
+            transType = i
+            showTool(currentTool)
+        })
+        box.addView(section("Duração"), lpm(WRAP, WRAP, t = 12))
+        box.addView(chipRow(transDurNames, transIdx) { i ->
+            pushUndo()
+            transIdx = i
+            showTool(currentTool)
+        })
+        box.addView(
+            note("Aparece só no vídeo exportado e precisa de 2 ou mais clipes. A bolinha na linha do tempo marca cada corte."),
+            lpm(MATCH, WRAP, t = 8)
+        )
+        return box
+    }
+
     private fun panelFormat(): View {
         val box = vbox()
         box.addView(section("Proporção"))
@@ -1271,13 +1499,7 @@ class MainActivity : ComponentActivity() {
             aspectIdx = i
             showTool(currentTool)
         })
-        box.addView(note("9:16 Reels/Shorts/TikTok · 16:9 YouTube · 4:5 feed"))
-        box.addView(section("Qualidade"), lpm(WRAP, WRAP, t = 12))
-        box.addView(chipRow(qualityNames, qualityIdx) { i ->
-            pushUndo()
-            qualityIdx = i
-            showTool(currentTool)
-        })
+        box.addView(note("16:9 YouTube · 9:16 Reels/Shorts/TikTok · 4:5 feed"))
         box.addView(section("Enquadramento"), lpm(WRAP, WRAP, t = 12))
         box.addView(chipRow(fitNames, fitIdx) { i ->
             pushUndo()
@@ -1296,16 +1518,11 @@ class MainActivity : ComponentActivity() {
             fadeOutIdx = i
             showTool(currentTool)
         })
-        box.addView(btn("Novo projeto (limpar tudo)") {
-            showStyled(
-                AlertDialog.Builder(this)
-                    .setTitle("Novo projeto")
-                    .setMessage("Remover todos os clipes, textos e áudios? Dá para desfazer.")
-                    .setPositiveButton("Limpar") { _, _ -> newProject() }
-                    .setNegativeButton("Cancelar", null)
-            )
-        }, lpm(WRAP, WRAP, t = 18))
-        box.addView(note("Vale para o vídeo exportado. Qualidade menor exporta mais rápido."), lpm(MATCH, WRAP, t = 8))
+        val r = hbox()
+        r.addView(btn("Nome e proporção…") { projectDialog(false) }, lpm(WRAP, WRAP, t = 16, r = 6))
+        r.addView(btn("Novo projeto") { projectDialog(true) }, lpm(WRAP, WRAP, t = 16))
+        box.addView(hscroll(r))
+        box.addView(note("Resolução e qualidade ficam em Exportar."), lpm(MATCH, WRAP, t = 8))
         return box
     }
 
@@ -1319,6 +1536,7 @@ class MainActivity : ComponentActivity() {
         muteOriginal = false
         fadeInIdx = 0
         fadeOutIdx = 0
+        transType = 0
         overlayKey = ""
         afterEdit(0, 0L)
     }
@@ -1444,11 +1662,11 @@ class MainActivity : ComponentActivity() {
     private fun totalMs(): Long = clips.sumOf { it.effMs }
 
     private fun updateSeekMax() {
-        timeSeek.max = totalMs().toInt().coerceAtLeast(1)
         if (clips.isEmpty()) {
-            timeSeek.progress = 0
+            timeline.posMs = 0L
             timeTv.text = "0:00.0 / 0:00.0"
         }
+        timeline.invalidate()
     }
 
     private fun currentTimelineMs(): Long {
@@ -1810,7 +2028,10 @@ class MainActivity : ComponentActivity() {
             o.put("voiceDur", voiceDurMs)
             o.put("voiceVol", voiceVol)
             o.put("mute", muteOriginal)
-            o.put("aspect", aspectIdx)
+            o.put("aspect2", aspectIdx)
+            o.put("name", projectName)
+            o.put("trans", transType)
+            o.put("transIdx", transIdx)
             o.put("quality", qualityIdx)
             o.put("fit", fitIdx)
             o.put("fadeIn", fadeInIdx)
@@ -1881,7 +2102,11 @@ class MainActivity : ComponentActivity() {
             }
             voiceVol = o.optInt("voiceVol", 100)
             muteOriginal = o.optBoolean("mute", false)
-            aspectIdx = o.optInt("aspect", 0).coerceIn(0, aspectNames.size - 1)
+            aspectIdx = o.optInt("aspect2", 0).coerceIn(0, aspectNames.size - 1)
+            projectName = o.optString("name", "Meu projeto")
+            nameTv.text = projectName
+            transType = o.optInt("trans", 0).coerceIn(0, transNames.size - 1)
+            transIdx = o.optInt("transIdx", 1).coerceIn(0, transDur.size - 1)
             qualityIdx = o.optInt("quality", 0).coerceIn(0, qualityNames.size - 1)
             fitIdx = o.optInt("fit", 0).coerceIn(0, fitNames.size - 1)
             fadeInIdx = o.optInt("fadeIn", 0).coerceIn(0, fadeNames.size - 1)
@@ -2091,6 +2316,20 @@ class MainActivity : ComponentActivity() {
             compAudio.add(FadeProcessor(fi, fo, totalMs()))
         }
 
+        if (transType != 0 && clips.size > 1) {
+            val bounds = ArrayList<Long>()
+            var cum = 0L
+            for (k in 0 until clips.size - 1) {
+                cum += clips[k].effMs
+                bounds.add(cum)
+            }
+            val tb = Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888)
+            tb.eraseColor(if (transType == 1) Color.BLACK else Color.WHITE)
+            val tl = ArrayList<TextureOverlay>()
+            tl.add(TransitionOverlay(tb, bounds, transDur[transIdx] / 2))
+            compEffects.add(OverlayEffect(ImmutableList.copyOf(tl)))
+        }
+
         val seqs = ArrayList<EditedMediaItemSequence>()
         seqs.add(EditedMediaItemSequence(items))
         val mu = musicUri
@@ -2104,9 +2343,15 @@ class MainActivity : ComponentActivity() {
 
         val saida = File(cacheDir, "saida_${System.currentTimeMillis()}.mp4")
 
+        val encoder = DefaultEncoderFactory.Builder(this)
+            .setRequestedVideoEncoderSettings(
+                VideoEncoderSettings.Builder().setBitrate(videoBitrate(ow, oh)).build()
+            )
+            .build()
         val t = Transformer.Builder(this)
-            .setVideoMimeType(MimeTypes.VIDEO_H264)
+            .setVideoMimeType(if (codecIdx == 1) MimeTypes.VIDEO_H265 else MimeTypes.VIDEO_H264)
             .setAudioMimeType(MimeTypes.AUDIO_AAC)
+            .setEncoderFactory(encoder)
             .addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, exportResult: ExportResult) {
                     setExporting(false)
