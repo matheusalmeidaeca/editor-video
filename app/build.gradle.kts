@@ -9,14 +9,14 @@ val temKeystore = keystoreFile != null && File(keystoreFile!!).exists()
 
 android {
     namespace = "com.editorvideo"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.editorvideo"
         minSdk = 29
         targetSdk = 34
-        versionCode = 24
-        versionName = "3.3.6"
+        versionCode = 25
+        versionName = "3.3.7"
     }
 
     signingConfigs {
