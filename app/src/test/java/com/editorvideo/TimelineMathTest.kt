@@ -61,4 +61,37 @@ class TimelineMathTest {
         assertEquals(800_000, TimelineMath.videoBitrate(100, 100, 0, 0))
         assertEquals(40_000_000, TimelineMath.videoBitrate(7680, 4320, 2, 0))
     }
+
+    @Test
+    fun snap_pegaOPontoMaisProximoDentroDoLimite() {
+        val pts = listOf(0L, 1_000L, 3_000L, 6_000L)
+        assertEquals(1_000L, TimelineMath.snap(1_080L, pts, 100L))
+        assertEquals(3_000L, TimelineMath.snap(2_950L, pts, 100L))
+        assertEquals(null, TimelineMath.snap(2_000L, pts, 100L))
+        assertEquals(0L, TimelineMath.snap(40L, pts, 100L))
+        assertEquals(null, TimelineMath.snap(500L, emptyList(), 100L))
+    }
+
+    @Test
+    fun snap_empateFicaComOPrimeiroMaisPerto() {
+        assertEquals(1_000L, TimelineMath.snap(1_030L, listOf(1_000L, 1_050L), 100L))
+    }
+
+    @Test
+    fun clipFades_mantemQuandoCabe() {
+        assertEquals(Pair(500L, 700L), TimelineMath.clipFades(500, 700, 5_000L))
+        assertEquals(Pair(0L, 0L), TimelineMath.clipFades(-100, 0, 5_000L))
+    }
+
+    @Test
+    fun clipFades_encolheQuandoPassaDaDuracao() {
+        val (fi, fo) = TimelineMath.clipFades(3_000, 3_000, 2_000L)
+        assertEquals(1_000L, fi)
+        assertEquals(1_000L, fo)
+        val (a, b) = TimelineMath.clipFades(3_000, 1_000, 2_000L)
+        assertTrue(a + b <= 2_000L)
+        assertEquals(1_500L, a)
+        assertEquals(500L, b)
+        assertEquals(Pair(0L, 0L), TimelineMath.clipFades(500, 500, 0L))
+    }
 }

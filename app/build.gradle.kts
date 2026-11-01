@@ -15,8 +15,8 @@ android {
         applicationId = "com.editorvideo"
         minSdk = 29
         targetSdk = 34
-        versionCode = 5
-        versionName = "3.1.1"
+        versionCode = 15
+        versionName = "3.2.9"
     }
 
     signingConfigs {
@@ -56,4 +56,5 @@ dependencies {
     implementation("androidx.media3:media3-effect:1.4.1")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

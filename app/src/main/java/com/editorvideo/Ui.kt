@@ -11,6 +11,7 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.os.SystemClock
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
@@ -165,7 +166,14 @@ class LiquidProgress(context: Context) : View(context) {
 /** Linha do tempo contínua: a agulha fica no centro e a trilha desliza por baixo (estilo KineMaster). */
 class TimelineView(context: Context) : View(context) {
 
-    class ClipInfo(val effMs: Long, val thumb: Bitmap?, val label: String)
+    class ClipInfo(
+        val effMs: Long,
+        val thumb: Bitmap?,
+        val label: String,
+        val wave: WaveData? = null,
+        val srcStartMs: Long = 0L,
+        val speed: Float = 1f
+    )
     class Bar(val startMs: Long, val endMs: Long, val label: String, val color: Int)
 
     var clips: List<ClipInfo> = emptyList()
@@ -173,6 +181,8 @@ class TimelineView(context: Context) : View(context) {
     var selected = -1
     var musicMs = 0L
     var voiceMs = 0L
+    var musicWave: WaveData? = null
+    var voiceWave: WaveData? = null
     var transOn = false
     var posMs = 0L
         set(v) {
@@ -199,6 +209,7 @@ class TimelineView(context: Context) : View(context) {
     private var downX = 0f
     private var downPos = 0L
     private var moved = false
+    private var snappedTo = -1L
 
     private val scaler = ScaleGestureDetector(
         context,
@@ -218,6 +229,32 @@ class TimelineView(context: Context) : View(context) {
         val m = s / 60
         val r = s % 60
         return if (ms % 1000L != 0L) "%d:%02d.5".format(m, r) else "%d:%02d".format(m, r)
+    }
+
+    /**
+     * Barras da forma de onda entre [x0] e [x1] (só as colunas visíveis). [srcStart] e [speed] ligam o tempo
+     * do clipe na linha do tempo ao tempo do arquivo. Com [centered], a barra cresce para os dois lados de [base].
+     */
+    private fun drawWave(
+        canvas: Canvas, wd: WaveData, x0: Float, x1: Float, base: Float, maxH: Float,
+        centered: Boolean, ppm: Float, srcStart: Long, speed: Float, color: Int, viewW: Float
+    ) {
+        val step = 2f * d
+        val barW = 1.4f * d
+        var x = max(x0, 0f)
+        val limit = min(x1, viewW)
+        paint.style = Paint.Style.FILL
+        paint.color = color
+        while (x < limit) {
+            val tA = (x - x0) / ppm
+            val tB = tA + step / ppm
+            val pk = WaveMath.maxIn(wd.peaks, wd.bucketMs, srcStart + tA * speed.toDouble(), srcStart + tB * speed.toDouble())
+            val hh = max(0.8f * d, WaveMath.level(pk, wd.norm) * maxH)
+            val xr = min(x + barW, limit)
+            if (centered) canvas.drawRect(x, base - hh, xr, base + hh, paint)
+            else canvas.drawRect(x, base - hh, xr, base, paint)
+            x += step
+        }
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -290,6 +327,14 @@ class TimelineView(context: Context) : View(context) {
                         tx += tileW
                     }
                 }
+                val wd = ci.wave
+                if (wd != null) {
+                    val base = vBot - 14f * d
+                    val maxH = min((vBot - vTop - 14f * d) * 0.7f, 30f * d)
+                    paint.color = 0x66000000
+                    canvas.drawRect(rect.left, base - maxH - 2f * d, rect.right, base, paint)
+                    drawWave(canvas, wd, x0, x1, base, maxH, false, ppm, ci.srcStartMs, ci.speed, 0xDD2DE2C8.toInt(), w)
+                }
                 paint.color = 0x88000000.toInt()
                 canvas.drawRect(rect.left, vBot - 14f * d, rect.right, vBot, paint)
                 canvas.drawText(ci.label, max(x0, 0f) + 6f * d, vBot - 4f * d, txt)
@@ -339,6 +384,9 @@ class TimelineView(context: Context) : View(context) {
             paint.style = Paint.Style.FILL
             paint.color = 0xCC2BB673.toInt()
             canvas.drawRoundRect(rect, 4f * d, 4f * d, paint)
+            musicWave?.let {
+                drawWave(canvas, it, rect.left, rect.right, (rect.top + rect.bottom) / 2f, (rect.bottom - rect.top) / 2f, true, ppm, 0L, 1f, 0xE6FFFFFF.toInt(), w)
+            }
         }
         if (voiceMs > 0L) {
             val y = audioTop + audioH + 2f * d
@@ -346,6 +394,9 @@ class TimelineView(context: Context) : View(context) {
             paint.style = Paint.Style.FILL
             paint.color = 0xCCFF5C7A.toInt()
             canvas.drawRoundRect(rect, 4f * d, 4f * d, paint)
+            voiceWave?.let {
+                drawWave(canvas, it, rect.left, rect.right, (rect.top + rect.bottom) / 2f, (rect.bottom - rect.top) / 2f, true, ppm, 0L, 1f, 0xE6FFFFFF.toInt(), w)
+            }
         }
 
         // agulha
@@ -370,6 +421,7 @@ class TimelineView(context: Context) : View(context) {
                 downX = e.x
                 downPos = posMs
                 moved = false
+                snappedTo = -1L
             }
             MotionEvent.ACTION_MOVE -> {
                 val dx = e.x - downX
@@ -378,7 +430,22 @@ class TimelineView(context: Context) : View(context) {
                     onDrag(true)
                 }
                 if (moved && e.pointerCount == 1) {
-                    val t = (downPos - dx / ppm).toLong().coerceIn(0L, total())
+                    var t = (downPos - dx / ppm).toLong().coerceIn(0L, total())
+                    // ímã: gruda nos cortes entre clipes (e nas pontas) a até 8 dp, com um toque de vibração
+                    val pontos = ArrayList<Long>()
+                    pontos.add(0L)
+                    pontos.addAll(TimelineMath.boundaries(clips.map { it.effMs }))
+                    pontos.add(total())
+                    val alvo = TimelineMath.snap(t, pontos, (8f * d / ppm).toLong())
+                    if (alvo != null) {
+                        t = alvo
+                        if (snappedTo != alvo) {
+                            snappedTo = alvo
+                            performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                        }
+                    } else {
+                        snappedTo = -1L
+                    }
                     posMs = t
                     onSeek(t)
                 }
@@ -387,13 +454,16 @@ class TimelineView(context: Context) : View(context) {
                 if (!moved) {
                     val t = posMs + ((e.x - width / 2f) / ppm).toLong()
                     var acc = 0L
+                    var hit = false
                     for ((i, ci) in clips.withIndex()) {
                         if (t >= acc && t < acc + ci.effMs) {
                             onSelect(i)
+                            hit = true
                             break
                         }
                         acc += ci.effMs
                     }
+                    if (!hit) onSelect(-1) // toque fora dos clipes: solta a seleção
                 } else {
                     onDrag(false)
                 }

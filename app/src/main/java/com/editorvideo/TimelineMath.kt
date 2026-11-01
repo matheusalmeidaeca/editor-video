@@ -65,4 +65,37 @@ object TimelineMath {
         val f = if (codecIdx == 1) 0.7f else 1f
         return (w * h * 30f * bpp * f).toInt().coerceIn(800_000, 40_000_000)
     }
+
+    /**
+     * Ímã da agulha: devolve o ponto de [points] mais próximo de [posMs] se estiver a até [thresholdMs],
+     * ou null se nenhum estiver perto.
+     */
+    fun snap(posMs: Long, points: List<Long>, thresholdMs: Long): Long? {
+        var best: Long? = null
+        var bestDist = Long.MAX_VALUE
+        for (p in points) {
+            val dist = kotlin.math.abs(p - posMs)
+            if (dist <= thresholdMs && dist < bestDist) {
+                best = p
+                bestDist = dist
+            }
+        }
+        return best
+    }
+
+    /**
+     * Fades de áudio de um clipe: nunca negativos e, somados, nunca maiores que a duração do clipe
+     * (se passarem, os dois encolhem na mesma proporção). Devolve (entrada, saída) em ms.
+     */
+    fun clipFades(fadeInMs: Int, fadeOutMs: Int, effMs: Long): Pair<Long, Long> {
+        var fi = fadeInMs.coerceAtLeast(0).toLong()
+        var fo = fadeOutMs.coerceAtLeast(0).toLong()
+        val total = fi + fo
+        if (effMs <= 0L) return Pair(0L, 0L)
+        if (total > effMs) {
+            fi = fi * effMs / total
+            fo = fo * effMs / total
+        }
+        return Pair(fi, fo)
+    }
 }

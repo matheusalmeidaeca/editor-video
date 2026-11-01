@@ -3,6 +3,7 @@ package com.editorvideo
 import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
+import androidx.media3.common.audio.SonicAudioProcessor
 import java.nio.ByteBuffer
 
 /** Muda o volume (0.0 a 2.0) de áudio PCM 16 bits. */
@@ -74,4 +75,21 @@ class FadeProcessor(
         while (inputBuffer.hasRemaining()) out.put(inputBuffer.get())
         out.flip()
     }
+}
+
+/**
+ * Cadeia de áudio de um clipe, na ordem: velocidade, volume, fades do clipe.
+ * Usada pela exportação e pela extração de áudio, para as duas soarem igual.
+ */
+internal fun clipAudioProcessors(c: Clip): List<AudioProcessor> {
+    val a = ArrayList<AudioProcessor>()
+    if (c.speed != 1f) {
+        val sonic = SonicAudioProcessor()
+        sonic.setSpeed(c.speed)
+        a.add(sonic)
+    }
+    if (c.vol != 100) a.add(GainProcessor(c.vol / 100f))
+    val (fin, fout) = TimelineMath.clipFades(c.fadeIn, c.fadeOut, c.effMs)
+    if (fin > 0L || fout > 0L) a.add(FadeProcessor(fin, fout, c.effMs))
+    return a
 }

@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Matrix
@@ -55,6 +56,8 @@ import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.addCallback
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
@@ -94,6 +97,9 @@ import com.google.common.collect.ImmutableList
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.max
@@ -101,139 +107,6 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
-
-    // ------------------------------------------------------------------ modelo
-
-    private class Clip(val uri: Uri, val name: String, val durationMs: Long, val w: Int, val h: Int) {
-        var startMs = 0L
-        var endMs = durationMs
-        var speed = 1f
-        var rotation = 0
-        var flip = false
-        var filter = 0
-        var brightness = 0
-        var contrast = 0
-        var sat = 0
-        var vol = 100
-        var zoom = 100
-        var panX = 0
-        var panY = 0
-        var ken = 0
-        var thumb: Bitmap? = null
-
-        val effMs: Long get() = TimelineMath.effMs(startMs, endMs, speed)
-
-        fun copy(): Clip {
-            val c = Clip(uri, name, durationMs, w, h)
-            c.startMs = startMs
-            c.endMs = endMs
-            c.speed = speed
-            c.rotation = rotation
-            c.flip = flip
-            c.filter = filter
-            c.brightness = brightness
-            c.contrast = contrast
-            c.sat = sat
-            c.vol = vol
-            c.zoom = zoom
-            c.panX = panX
-            c.panY = panY
-            c.ken = ken
-            c.thumb = thumb
-            return c
-        }
-    }
-
-    private class TextItem(
-        val text: String,
-        val startMs: Long,
-        val endMs: Long,
-        val pos: Int,
-        val size: Int,
-        val color: Int,
-        val posX: Int = 1,
-        val sticker: Boolean = false
-    )
-
-    private class TimedText(
-        val item: TextItem,
-        val span: SpannableString,
-        val shown: OverlaySettings,
-        val hidden: OverlaySettings
-    ) : TextOverlay() {
-        override fun getText(presentationTimeUs: Long): SpannableString = span
-
-        override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings {
-            val ms = presentationTimeUs / 1000
-            return if (ms >= item.startMs && ms <= item.endMs) shown else hidden
-        }
-    }
-
-    /** Camada preta de tela cheia cuja opacidade controla o fade de abertura e de final. */
-    private class FadeOverlay(
-        val bmp: Bitmap,
-        val totalMs: Long,
-        val inMs: Long,
-        val outMs: Long
-    ) : BitmapOverlay() {
-        override fun getBitmap(presentationTimeUs: Long): Bitmap = bmp
-
-        override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings {
-            val ms = presentationTimeUs / 1000
-            var a = 0f
-            if (inMs > 0L && ms < inMs) a = 1f - ms.toFloat() / inMs
-            if (outMs > 0L && ms > totalMs - outMs) {
-                a = max(a, (ms - (totalMs - outMs)).toFloat() / outMs)
-            }
-            return OverlaySettings.Builder()
-                .setScale(1.02f, 1.02f)
-                .setAlphaScale(a.coerceIn(0f, 1f))
-                .build()
-        }
-    }
-
-    /** Transição entre clipes: a tela vai à cor escolhida no corte e volta. */
-    private class TransitionOverlay(
-        val bmp: Bitmap,
-        val bounds: List<Long>,
-        val halfMs: Long
-    ) : BitmapOverlay() {
-        override fun getBitmap(presentationTimeUs: Long): Bitmap = bmp
-
-        override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings {
-            val ms = presentationTimeUs / 1000
-            var a = 0f
-            for (b in bounds) {
-                val dist = abs(ms - b)
-                if (dist < halfMs) a = max(a, 1f - dist.toFloat() / halfMs)
-            }
-            return OverlaySettings.Builder()
-                .setScale(1.02f, 1.02f)
-                .setAlphaScale(a.coerceIn(0f, 1f))
-                .build()
-        }
-    }
-
-    private class Snapshot(
-        val clips: List<Clip>,
-        val texts: List<TextItem>,
-        val selected: Int,
-        val musicUri: Uri?,
-        val musicName: String,
-        val musicDurMs: Long,
-        val musicVol: Int,
-        val voiceUri: Uri?,
-        val voiceDurMs: Long,
-        val voiceVol: Int,
-        val muteOriginal: Boolean,
-        val aspectIdx: Int,
-        val qualityIdx: Int,
-        val fitIdx: Int,
-        val fadeInIdx: Int,
-        val fadeOutIdx: Int,
-        val transType: Int,
-        val transIdx: Int
-    )
 
     // ------------------------------------------------------------------ estado
 
@@ -260,10 +133,16 @@ class MainActivity : ComponentActivity() {
     private var bitrateIdx = 1
     private var projectName = "Meu projeto"
     private var exporting = false
+    private var extractingAudio = false
+    private var analysingSilence = false
     private var dragging = false
     private var recording = false
     private var previewFx = true
     private var overlayKey = ""
+    private var currentId: String? = null
+    private var onHome = true
+    private var thumbSavedFor = ""
+    private lateinit var store: ProjectStore
 
     private val undoStack = mutableListOf<Snapshot>()
     private val redoStack = mutableListOf<Snapshot>()
@@ -288,11 +167,7 @@ class MainActivity : ComponentActivity() {
     private val toolIcons = listOf("✂️", "⏩", "🎨", "🔄", "🔀", "🔤", "😀", "🔊", "📐")
     private val posNames = listOf("Topo", "Centro", "Base")
     private val posXNames = listOf("Esquerda", "Centro", "Direita")
-    private val posY = listOf(0.8f, 0f, -0.8f)
-    private val posXv = listOf(-0.6f, 0f, 0.6f)
     private val sizeNames = listOf("Pequeno", "Médio", "Grande")
-    private val sizeFactor = listOf(0.045f, 0.07f, 0.10f)
-    private val stickerFactor = listOf(0.09f, 0.15f, 0.24f)
     private val colorNames = listOf("Branco", "Amarelo", "Vermelho", "Ciano", "Preto")
     private val colorValues = listOf(Color.WHITE, Color.YELLOW, Color.RED, Color.CYAN, Color.BLACK)
     private val emojis = listOf(
@@ -353,6 +228,7 @@ class MainActivity : ComponentActivity() {
                 val t = transformer
                 if (t != null && t.getProgress(progressHolder) == Transformer.PROGRESS_STATE_AVAILABLE) {
                     progressBar.progress = progressHolder.progress
+                    ExportService.progress(applicationContext, progressHolder.progress)
                     statusTv.text = "Exportando… ${progressHolder.progress}%"
                 }
             }
@@ -361,20 +237,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private val pickVideos =
-        registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-            if (uris.isNotEmpty()) {
-                pushUndo()
-                val firstNew = clips.size
-                uris.forEach {
-                    keepAccess(it)
-                    addClip(it)
-                }
-                if (clips.size > firstNew) {
-                    selected = firstNew
-                    afterEdit(firstNew, 0L)
-                }
-            }
+        registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> addClipsFrom(uris) }
+
+    // Galeria do sistema (Photo Picker): o acesso é temporário, então os vídeos são copiados para `imports/`.
+    private val pickGallery =
+        registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(30)) { uris ->
+            if (uris.isNotEmpty()) copyAndAdd(uris)
         }
+
+    private fun openGallery() {
+        pickGallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+    }
 
     private val pickMusic =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -396,6 +269,9 @@ class MainActivity : ComponentActivity() {
                 showTool(currentTool)
             }
         }
+
+    private val askNotif =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> exportar() }
 
     private val askMic =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
@@ -449,15 +325,32 @@ class MainActivity : ComponentActivity() {
             }
         })
 
+        store = ProjectStore(File(filesDir, "projects"))
+        migrateLegacyProject()
+        onBackPressedDispatcher.addCallback(this) {
+            if (!onHome) {
+                goHome()
+            } else {
+                isEnabled = false
+                onBackPressedDispatcher.onBackPressed()
+            }
+        }
         buildUi()
         handler.post(ticker)
-        loadProject()
+        showHome()
+        if (savedInstanceState == null) handleShare(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleShare(intent)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         pulse?.cancel()
         buildUi()
+        if (onHome) showHome()
     }
 
     override fun onStop() {
@@ -471,7 +364,10 @@ class MainActivity : ComponentActivity() {
         handler.removeCallbacks(ticker)
         handler.removeCallbacks(saveRunnable)
         pulse?.cancel()
-        transformer?.cancel()
+        if (isFinishing) {
+            transformer?.cancel()
+            if (exporting) ExportService.finish(applicationContext, "Exportação cancelada.", null)
+        }
         player.release()
         bgExec.shutdown()
         super.onDestroy()
@@ -666,6 +562,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun queryName(uri: Uri): String {
+        if (uri.scheme == "file") return File(uri.path ?: "").name.substringAfter('_', "arquivo")
         contentResolver.query(uri, null, null, null, null)?.use { c ->
             val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
             if (i >= 0 && c.moveToFirst()) return c.getString(i)
@@ -708,6 +605,7 @@ class MainActivity : ComponentActivity() {
         }
         titleBox.addView(title)
         titleBox.addView(nameTv)
+        top.addView(iconBtn("☰") { editorMenu() }, lpm(dp(42), dp(42), r = 8))
         top.addView(titleBox, lpm(0, WRAP, weight = 1f))
         undoBtn = iconBtn("↩") { undo() }
         redoBtn = iconBtn("↪") { redo() }
@@ -738,12 +636,12 @@ class MainActivity : ComponentActivity() {
             setTextColor(cNavy)
             setTypeface(typeface, Typeface.BOLD)
             background = gradientOval()
-            setOnClickListener { projectDialog(true) }
+            setOnClickListener { pickVideos.launch(arrayOf("video/*")) }
         }
         press(plus)
         emptyState.addView(plus, lpm(dp(84), dp(84)))
-        emptyState.addView(tv("Toque para criar um projeto", 15f), lpm(WRAP, WRAP, t = 12))
-        emptyState.addView(tv("Nome, proporção e seus vídeos", 12f, cGrey), lpm(WRAP, WRAP, t = 2))
+        emptyState.addView(tv("Toque para adicionar vídeos", 15f), lpm(WRAP, WRAP, t = 12))
+        emptyState.addView(tv("Eles ficam guardados neste projeto", 12f, cGrey), lpm(WRAP, WRAP, t = 2))
         previewBox.addView(emptyState, FrameLayout.LayoutParams(MATCH, MATCH))
         pulse = ObjectAnimator.ofPropertyValuesHolder(
             plus,
@@ -785,10 +683,15 @@ class MainActivity : ComponentActivity() {
         actions.addView(btn("✂ Dividir") { splitClip() }, lpm(WRAP, WRAP, r = 6))
         actions.addView(btn("◧ Cortar à esquerda") { cutAtPlayhead(true) }, lpm(WRAP, WRAP, r = 6))
         actions.addView(btn("Cortar à direita ◨") { cutAtPlayhead(false) }, lpm(WRAP, WRAP, r = 6))
-        actions.addView(btn("⧉ Duplicar") { dupClip() }, lpm(WRAP, WRAP, r = 6))
-        actions.addView(btn("🗑 Excluir") { delClip() }, lpm(WRAP, WRAP, r = 6))
-        actions.addView(btn("◀ Mover") { moveClip(-1) }, lpm(WRAP, WRAP, r = 6))
-        actions.addView(btn("Mover ▶") { moveClip(1) }, lpm(WRAP, WRAP, r = 6))
+        // ações do clipe: só aparecem depois de tocar num clipe da linha do tempo (v3.2.9)
+        val grupo = hbox()
+        grupo.addView(btn("⧉ Duplicar") { dupClip() }, lpm(WRAP, WRAP, r = 6))
+        grupo.addView(btn("🗑 Excluir") { delClip() }, lpm(WRAP, WRAP, r = 6))
+        grupo.addView(btn("◀ Mover") { moveClip(-1) }, lpm(WRAP, WRAP, r = 6))
+        grupo.addView(btn("Mover ▶") { moveClip(1) }, lpm(WRAP, WRAP, r = 6))
+        grupo.visibility = View.GONE
+        clipGroup = grupo
+        actions.addView(grupo, lpm(WRAP, WRAP))
 
         toolsRow = hbox()
         panel = vbox().apply {
@@ -883,8 +786,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun projectDialog(isNew: Boolean) {
-        var asp = aspectIdx
-        val et = editField("Nome do projeto", projectName)
+        var asp = if (isNew) 0 else aspectIdx
+        val et = editField("Nome do projeto", if (isNew) "Meu projeto ${store.list().size + 1}" else projectName)
         val box = vbox().apply { setPadding(dp(20), dp(10), dp(20), 0) }
         box.addView(et)
         box.addView(section("Proporção da tela"), lpm(WRAP, WRAP, t = 14))
@@ -896,14 +799,17 @@ class MainActivity : ComponentActivity() {
                 .setView(ScrollView(this).apply { addView(box) })
                 .setPositiveButton(if (isNew) "Criar" else "OK") { _, _ ->
                     val n = et.text.toString().trim()
-                    if (isNew && (clips.isNotEmpty() || texts.isNotEmpty())) newProject()
-                    if (asp != aspectIdx) pushUndo()
-                    aspectIdx = asp
-                    projectName = if (n.isEmpty()) "Meu projeto" else n
-                    nameTv.text = projectName
-                    scheduleSave()
-                    showTool(currentTool)
-                    if (isNew) pickVideos.launch(arrayOf("video/*"))
+                    val nm = if (n.isEmpty()) "Meu projeto" else n
+                    if (isNew) {
+                        startNewProject(nm, asp)
+                    } else {
+                        if (asp != aspectIdx) pushUndo()
+                        aspectIdx = asp
+                        projectName = nm
+                        nameTv.text = projectName
+                        scheduleSave()
+                        showTool(currentTool)
+                    }
                 }
                 .setNegativeButton("Cancelar", null)
         )
@@ -945,7 +851,18 @@ class MainActivity : ComponentActivity() {
                 ?: if (max(ow, oh) > 2000) "Acima de 1080p pode ficar lento e esquentar o aparelho." else null
             info.text = if (warn != null) base + "\n" + warn else base
         }
-        box.addView(section("Formato"))
+        var dlg: AlertDialog? = null
+        box.addView(section("Predefinição"))
+        box.addView(chipGroup(ExportPresets.all.map { it.name }, -1) { i ->
+            val p = ExportPresets.all[i]
+            codecIdx = p.codecIdx
+            qualityIdx = p.qualityIdx
+            bitrateIdx = p.bitrateIdx
+            toast(p.hint)
+            dlg?.dismiss()
+            exportDialog()
+        })
+        box.addView(section("Formato"), lpm(WRAP, WRAP, t = 12))
         box.addView(chipGroup(listOf("Compatível (H.264)", "Menor arquivo (HEVC)"), codecIdx) { codecIdx = it; upd() })
         box.addView(section("Resolução"), lpm(WRAP, WRAP, t = 12))
         box.addView(chipGroup(qualityNames, qualityIdx) { qualityIdx = it; upd() })
@@ -953,11 +870,11 @@ class MainActivity : ComponentActivity() {
         box.addView(chipGroup(listOf("Baixa", "Média", "Alta"), bitrateIdx) { bitrateIdx = it; upd() })
         box.addView(info, lpm(WRAP, WRAP, t = 14))
         upd()
-        showStyled(
+        dlg = showStyled(
             AlertDialog.Builder(this)
                 .setTitle("Salvar e compartilhar")
                 .setView(ScrollView(this).apply { addView(box) })
-                .setPositiveButton("Salvar como vídeo") { _, _ -> exportar() }
+                .setPositiveButton("Salvar como vídeo") { _, _ -> askNotifThenExport() }
                 .setNegativeButton("Cancelar", null)
         )
     }
@@ -973,7 +890,8 @@ class MainActivity : ComponentActivity() {
         }
         scrim.setOnClickListener { close() }
         val items: List<Triple<String, String, () -> Unit>> = listOf(
-            Triple("🎞️", "Vídeo", { pickVideos.launch(arrayOf("video/*")) }),
+            Triple("🖼️", "Galeria", { openGallery() }),
+            Triple("🎞️", "Arquivos", { pickVideos.launch(arrayOf("video/*")) }),
             Triple("🔤", "Texto", {
                 currentTool = 5
                 buildToolTabs()
@@ -985,7 +903,7 @@ class MainActivity : ComponentActivity() {
         )
         val radius = dp(100).toFloat()
         items.forEachIndexed { i, it3 ->
-            val ang = Math.toRadians(-90.0 + i * 90.0)
+            val ang = Math.toRadians(-90.0 + i * 360.0 / items.size)
             val dx = (radius * Math.cos(ang)).toFloat()
             val dy = (radius * Math.sin(ang)).toFloat()
             val b = vbox().apply {
@@ -1088,7 +1006,7 @@ class MainActivity : ComponentActivity() {
         emptyState.visibility = if (clips.isEmpty()) View.VISIBLE else View.GONE
         timeline.clips = clips.mapIndexed { i, c ->
             val extra = (if (c.speed != 1f) " ${fmtSpeed(c.speed)}x" else "") + (if (c.filter != 0) " 🎨" else "")
-            TimelineView.ClipInfo(c.effMs, c.thumb, "${i + 1} · ${fmt(c.effMs)}$extra")
+            TimelineView.ClipInfo(c.effMs, c.thumb, "${i + 1} · ${fmt(c.effMs)}$extra", waveFor(c.uri, c.durationMs), c.startMs, c.speed)
         }
         timeline.selected = if (clips.isEmpty()) -1 else selected
         timeline.bars = texts.map {
@@ -1097,11 +1015,53 @@ class MainActivity : ComponentActivity() {
         val tot = totalMs()
         timeline.musicMs = if (musicUri != null) (if (musicDurMs > 0L) min(musicDurMs, tot) else tot) else 0L
         timeline.voiceMs = if (voiceUri != null) min(voiceDurMs, tot) else 0L
+        timeline.musicWave = musicUri?.let { waveFor(it, musicDurMs) }
+        timeline.voiceWave = voiceUri?.let { waveFor(it, voiceDurMs) }
         timeline.transOn = transType != 0 && clips.size > 1
         timeline.invalidate()
+        if (selected !in clips.indices) clipPicked = false
+        clipGroup?.visibility = if (clipPicked) View.VISIBLE else View.GONE
     }
 
-    // ------------------------------------------------------------------ desfazer / refazer
+    // ------------------------------------------------------------------ forma de onda (v3.2.7)
+
+    private val waves = HashMap<String, WaveData>()
+    private val waveBusy = HashSet<String>()
+    private val waveExec = Executors.newSingleThreadExecutor { r ->
+        Thread {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+            r.run()
+        }
+    }
+
+    /**
+     * Forma de onda do arquivo inteiro, ou null enquanto ainda não existe (a análise roda em segundo plano
+     * e, ao terminar, redesenha a linha do tempo). Arquivo sem áudio ou que o aparelho não decodifica
+     * fica marcado como vazio e não é analisado de novo. Só chamar na thread da tela.
+     */
+    private fun waveFor(uri: Uri, durMs: Long): WaveData? {
+        val key = uri.toString()
+        val got = waves[key]
+        if (got != null) return if (got.peaks.isEmpty()) null else got
+        if (durMs <= 0L || !waveBusy.add(key)) return null
+        val bucket = WaveMath.bucketFor(durMs)
+        waveExec.execute {
+            val p = try {
+                AudioPeaks.compute(applicationContext, uri, 0L, durMs + bucket, bucket)
+            } catch (e: Throwable) {
+                null
+            }
+            handler.post {
+                waveBusy.remove(key)
+                if (isDestroyed) return@post
+                if (waves.size > 30) waves.clear()
+                waves[key] = WaveData(p ?: FloatArray(0), bucket)
+                refreshTimeline()
+            }
+        }
+        return null
+    }
+
     // ------------------------------------------------------------------ desfazer / refazer
 
     private fun snapshot() = Snapshot(
@@ -1199,11 +1159,81 @@ class MainActivity : ComponentActivity() {
         r.addView(btn("⇤ Início aqui") { trimHere(false) }, lpm(WRAP, WRAP, t = 10, r = 6))
         r.addView(btn("Fim aqui ⇥") { trimHere(true) }, lpm(WRAP, WRAP, t = 10))
         box.addView(hscroll(r))
+        box.addView(btn("Remover silêncios") { removerSilencios() }, lpm(WRAP, WRAP, t = 10))
         box.addView(
-            note("Arraste os controles ou pause no ponto certo e toque em “Início aqui” / “Fim aqui”. Para cortar no meio, use ✂ Dividir."),
+            note("Arraste os controles ou pause no ponto certo e toque em “Início aqui” / “Fim aqui”. Para cortar no meio, use ✂ Dividir. “Remover silêncios” divide o clipe nos trechos com som e tira as pausas longas."),
             lpm(MATCH, WRAP, t = 8)
         )
         return box
+    }
+
+    /**
+     * Divide o clipe selecionado nos trechos com som e descarta as pausas longas (500 ms ou mais).
+     * A análise decodifica o áudio fora da thread da tela; o resultado vira vários clipes, com desfazer.
+     */
+    private fun removerSilencios() {
+        val c = sel() ?: return
+        if (analysingSilence || exporting || extractingAudio) {
+            toast("Espere o processo em andamento terminar.")
+            return
+        }
+        analysingSilence = true
+        statusTv.text = "Procurando silêncios…"
+        val uri = c.uri
+        val s0 = c.startMs
+        val e0 = c.endMs
+        Thread {
+            val bucket = 50L
+            val peaks = AudioPeaks.compute(applicationContext, uri, s0, e0, bucket)
+            val ranges = if (peaks == null) null
+            else SilenceMath.voicedRanges(peaks, bucket, 0.06f, 500L, 120L, 100L, 300L)
+            handler.post {
+                analysingSilence = false
+                if (!isDestroyed) aplicarSilencios(c, s0, e0, ranges)
+            }
+        }.start()
+    }
+
+    private fun aplicarSilencios(c: Clip, s0: Long, e0: Long, ranges: List<Pair<Long, Long>>?) {
+        val i = clips.indexOf(c)
+        if (i < 0 || c.startMs != s0 || c.endMs != e0) {
+            statusTv.text = ""
+            toast("O clipe mudou durante a análise. Tente de novo.")
+            return
+        }
+        if (ranges == null) {
+            statusTv.text = "Não consegui analisar o áudio deste clipe (sem som ou formato não aceito)."
+            return
+        }
+        if (ranges.isEmpty()) {
+            statusTv.text = "Não encontrei fala ou som neste clipe."
+            return
+        }
+        val total = e0 - s0
+        val pieces = ranges.map { Pair(it.first.coerceAtMost(total), it.second.coerceAtMost(total)) }
+            .filter { it.second - it.first >= 300L }
+        val kept = pieces.sumOf { it.second - it.first }
+        val removed = total - kept
+        if (pieces.isEmpty() || removed < 500L) {
+            statusTv.text = "Não encontrei silêncios longos para remover."
+            return
+        }
+        pushUndo()
+        clips.removeAt(i)
+        var at = i
+        for ((k, p) in pieces.withIndex()) {
+            val n = c.copy()
+            n.startMs = s0 + p.first
+            n.endMs = s0 + p.second
+            // os fades de áudio do clipe original ficam só nas pontas do conjunto
+            if (k > 0) n.fadeIn = 0
+            if (k < pieces.size - 1) n.fadeOut = 0
+            clips.add(at++, n)
+        }
+        selected = i
+        statusTv.text = "Removi ${fmt(removed)} de silêncio e o clipe virou ${pieces.size} trecho(s)."
+        afterEdit(i, 0L)
+        for (k in i until i + pieces.size) loadThumb(clips[k])
     }
 
     private fun trimHere(isEnd: Boolean) {
@@ -1419,6 +1449,13 @@ class MainActivity : ComponentActivity() {
                 refreshTimeline()
                 scheduleSave()
             })
+            // fade de áudio por clipe, em passos de 0,1 s (0 a 3 s). Só vale na exportação; a prévia não mostra.
+            labeledSeek(box, { "Fade de entrada do áudio: ${it / 10},${it % 10} s" }, 0, 30, c.fadeIn / 100,
+                { c.fadeIn = it * 100 }, { pushUndo() }, { scheduleSave() })
+            labeledSeek(box, { "Fade de saída do áudio: ${it / 10},${it % 10} s" }, 0, 30, c.fadeOut / 100,
+                { c.fadeOut = it * 100 }, { pushUndo() }, { scheduleSave() })
+            box.addView(tv("O fade de cada clipe é aplicado ao exportar; a prévia ainda não o mostra.", 12f, cGrey), lpm(WRAP, WRAP, t = 4))
+            box.addView(btn("Extrair áudio deste clipe") { extrairAudio(c) }, lpm(WRAP, WRAP, t = 8))
         }
         val cb = CheckBox(this).apply {
             text = "Remover áudio original dos vídeos"
@@ -1538,25 +1575,432 @@ class MainActivity : ComponentActivity() {
         })
         val r = hbox()
         r.addView(btn("Nome e proporção…") { projectDialog(false) }, lpm(WRAP, WRAP, t = 16, r = 6))
-        r.addView(btn("Novo projeto") { projectDialog(true) }, lpm(WRAP, WRAP, t = 16))
+        r.addView(btn("Novo projeto") { projectDialog(true) }, lpm(WRAP, WRAP, t = 16, r = 6))
+        r.addView(btn("Tela inicial") { goHome() }, lpm(WRAP, WRAP, t = 16))
         box.addView(hscroll(r))
         box.addView(note("Resolução e qualidade ficam em Exportar."), lpm(MATCH, WRAP, t = 8))
         return box
     }
 
-    private fun newProject() {
-        pushUndo()
+    // ------------------------------------------------------------------ projetos e navegação
+
+    /** Traz o projeto único da v3.1.x (SharedPreferences) para a pasta de projetos. */
+    private fun migrateLegacyProject() {
+        val prefs = getSharedPreferences("editor", MODE_PRIVATE)
+        val old = prefs.getString("project", null) ?: return
+        try {
+            val o = JSONObject(old)
+            val temConteudo = (o.optJSONArray("clips")?.length() ?: 0) > 0 ||
+                (o.optJSONArray("texts")?.length() ?: 0) > 0
+            if (!temConteudo) {
+                prefs.edit().remove("project").apply()
+                return
+            }
+            o.put("schema", 2)
+            o.put("updated", System.currentTimeMillis())
+            if (store.write(store.newId(), o.toString())) prefs.edit().remove("project").apply()
+        } catch (e: Exception) {
+            // mantém o antigo onde está; tenta de novo na próxima abertura
+        }
+    }
+
+    /** Zera o que está na memória (não mexe em arquivos). */
+    private fun resetState() {
+        player.pause()
         clips.clear()
         texts.clear()
         selected = 0
+        clipPicked = false
         musicUri = null
+        musicName = ""
+        musicDurMs = 0L
+        musicVol = 100
         voiceUri = null
+        voiceDurMs = 0L
+        voiceVol = 100
         muteOriginal = false
+        aspectIdx = 0
+        qualityIdx = 0
+        fitIdx = 0
         fadeInIdx = 0
         fadeOutIdx = 0
         transType = 0
+        transIdx = 1
+        projectName = "Meu projeto"
+        nameTv.text = projectName
+        undoStack.clear()
+        redoStack.clear()
         overlayKey = ""
+        thumbSavedFor = ""
         afterEdit(0, 0L)
+        updateUndoButtons()
+    }
+
+    private fun startNewProject(name: String, asp: Int, pick: Boolean = true) {
+        saveProject()
+        resetState()
+        currentId = store.newId()
+        projectName = name
+        nameTv.text = name
+        aspectIdx = asp
+        saveProject() // grava já, mesmo vazio, para o projeto aparecer na lista
+        showEditor()
+        if (pick) pickVideos.launch(arrayOf("video/*"))
+    }
+
+    private fun openProject(id: String) {
+        val s = store.read(id)
+        if (s == null) {
+            toast("Projeto não encontrado")
+            showHome()
+            return
+        }
+        if (id != currentId) {
+            saveProject()
+            resetState()
+            currentId = id
+            loadFromJson(s)
+        }
+        showEditor()
+    }
+
+    private fun goHome() {
+        handler.removeCallbacks(saveRunnable)
+        player.pause()
+        if (recording) stopRecording()
+        saveProject()
+        showHome()
+    }
+
+    private fun showEditor() {
+        onHome = false
+        setContentView(rootFrame)
+        nameTv.text = projectName
+        refreshTimeline()
+        updateSeekMax()
+        updateUndoButtons()
+        showTool(currentTool)
+        fitSurface(player.videoSize)
+        exportBtn.text = if (exporting) "Cancelar" else "Exportar"
+    }
+
+    private fun saveThumb(id: String) {
+        val c = clips.firstOrNull() ?: return
+        val th = c.thumb ?: return
+        val key = id + c.uri
+        if (key == thumbSavedFor) return
+        try {
+            store.thumbFile(id).outputStream().use { th.compress(Bitmap.CompressFormat.JPEG, 80, it) }
+            thumbSavedFor = key
+        } catch (e: Exception) {
+            // sem miniatura na lista, tudo bem
+        }
+    }
+
+    private fun fmtShort(ms: Long): String {
+        val t = ms / 1000
+        return "%d:%02d".format(t / 60, t % 60)
+    }
+
+    private fun showHome() {
+        onHome = true
+        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val frame = FrameLayout(this)
+        frame.addView(LiquidBackground(this), FrameLayout.LayoutParams(MATCH, MATCH))
+        val outer = vbox().apply { setPadding(dp(16), dp(14), dp(16), dp(8)) }
+
+        val top = hbox()
+        val title = tv("Editor de Vídeo", 22f).apply { setTypeface(typeface, Typeface.BOLD) }
+        title.paint.shader = LinearGradient(
+            0f, 0f, dp(190).toFloat(), 0f,
+            intArrayOf(Color.WHITE, cAccent), null, Shader.TileMode.CLAMP
+        )
+        top.addView(title, lpm(0, WRAP, weight = 1f))
+        top.addView(iconBtn("☰") { homeMenu() }, lpm(dp(42), dp(42)))
+        outer.addView(top)
+
+        val novo = btn("＋  Novo projeto") { projectDialog(true) }.apply {
+            background = gradient(28)
+            setTextColor(cNavy)
+            typeface = Typeface.DEFAULT_BOLD
+            textSize = 17f
+        }
+        outer.addView(novo, lpm(MATCH, dp(56), t = 14))
+        val atalhos = hbox()
+        atalhos.addView(btn("🎞️ Importar vídeo") {
+            startNewProject("Meu projeto ${store.list().size + 1}", 0)
+        }, lpm(WRAP, WRAP, r = 6))
+        outer.addView(hscroll(atalhos), lpm(MATCH, WRAP, t = 8))
+
+        outer.addView(section("Projetos recentes"), lpm(WRAP, WRAP, t = 16, b = 6))
+        val lista = store.list()
+        val col = vbox()
+        if (lista.isEmpty()) {
+            col.addView(note("Nenhum projeto ainda. Toque em Novo projeto para começar."))
+        } else {
+            val cols = if (landscape) 4 else 2
+            val data = SimpleDateFormat("dd/MM", Locale("pt", "BR"))
+            lista.chunked(cols).forEach { linha ->
+                val row = hbox()
+                linha.forEach { m ->
+                    val card = vbox().apply {
+                        background = glass(16)
+                        setPadding(dp(8), dp(8), dp(8), dp(8))
+                        isClickable = true
+                        setOnClickListener { openProject(m.id) }
+                        setOnLongClickListener {
+                            projectActions(m)
+                            true
+                        }
+                    }
+                    val img = ImageView(this).apply {
+                        scaleType = ImageView.ScaleType.CENTER_CROP
+                        setBackgroundColor(0x33000000)
+                        val tf = store.thumbFile(m.id)
+                        if (tf.exists()) setImageBitmap(BitmapFactory.decodeFile(tf.absolutePath))
+                    }
+                    card.addView(img, lpm(MATCH, dp(if (landscape) 80 else 104)))
+                    card.addView(tv(m.name, 14f).apply {
+                        maxLines = 1
+                        ellipsize = TextUtils.TruncateAt.END
+                    }, lpm(MATCH, WRAP, t = 6))
+                    val n = m.clipCount
+                    card.addView(
+                        note("$n ${if (n == 1) "clipe" else "clipes"} · ${fmtShort(m.totalMs)} · ${data.format(Date(m.updatedMs))}"),
+                        lpm(MATCH, WRAP, t = 2)
+                    )
+                    press(card)
+                    row.addView(card, lpm(0, WRAP, r = 8, b = 8, weight = 1f))
+                }
+                repeat(cols - linha.size) { row.addView(View(this), lpm(0, 1, r = 8, weight = 1f)) }
+                col.addView(row)
+            }
+            col.addView(note("Toque longo no projeto: duplicar, renomear ou excluir."), lpm(MATCH, WRAP, t = 4))
+        }
+        val scroll = ScrollView(this).apply {
+            isVerticalScrollBarEnabled = false
+            addView(col)
+        }
+        outer.addView(scroll, lpm(MATCH, 0, weight = 1f))
+        frame.addView(outer, FrameLayout.LayoutParams(MATCH, MATCH))
+        setContentView(frame)
+    }
+
+    private fun projectActions(m: ProjectMeta) {
+        showStyled(
+            AlertDialog.Builder(this)
+                .setTitle(m.name)
+                .setItems(arrayOf("Duplicar", "Renomear", "Excluir")) { _, which ->
+                    when (which) {
+                        0 -> {
+                            saveProject()
+                            if (store.duplicate(m.id) != null) toast("Projeto duplicado") else toast("Não consegui duplicar")
+                            showHome()
+                        }
+                        1 -> renameProject(m)
+                        2 -> confirmDelete(m)
+                    }
+                }
+        )
+    }
+
+    private fun renameProject(m: ProjectMeta) {
+        val et = editField("Nome do projeto", m.name)
+        val box = vbox().apply { setPadding(dp(20), dp(10), dp(20), 0) }
+        box.addView(et)
+        showStyled(
+            AlertDialog.Builder(this)
+                .setTitle("Renomear")
+                .setView(box)
+                .setPositiveButton("OK") { _, _ ->
+                    val n = et.text.toString().trim()
+                    if (n.isNotEmpty()) {
+                        if (m.id == currentId) {
+                            saveProject()
+                            projectName = n
+                            nameTv.text = n
+                        }
+                        store.rename(m.id, n)
+                        if (m.id == currentId) saveProject()
+                        showHome()
+                    }
+                }
+                .setNegativeButton("Cancelar", null)
+        )
+    }
+
+    private fun confirmDelete(m: ProjectMeta) {
+        showStyled(
+            AlertDialog.Builder(this)
+                .setTitle("Excluir projeto?")
+                .setMessage("“${m.name}” será apagado. Os vídeos originais não são afetados.")
+                .setPositiveButton("Excluir") { _, _ ->
+                    handler.removeCallbacks(saveRunnable)
+                    store.delete(m.id)
+                    store.purgeUnreferenced(File(filesDir, "imports"))
+                    if (m.id == currentId) {
+                        currentId = null
+                        resetState()
+                    }
+                    showHome()
+                }
+                .setNegativeButton("Cancelar", null)
+        )
+    }
+
+    private fun homeMenu() {
+        showStyled(
+            AlertDialog.Builder(this)
+                .setItems(arrayOf("Novo projeto", "Limpar cache de exportação", "Sobre")) { _, which ->
+                    when (which) {
+                        0 -> projectDialog(true)
+                        1 -> clearExportCache()
+                        2 -> aboutDialog()
+                    }
+                }
+        )
+    }
+
+    private fun editorMenu() {
+        showStyled(
+            AlertDialog.Builder(this)
+                .setTitle(projectName)
+                .setItems(arrayOf("Projetos (tela inicial)", "Nome e proporção…", "Duplicar este projeto", "Salvar agora", "Exportar…")) { _, which ->
+                    when (which) {
+                        0 -> goHome()
+                        1 -> projectDialog(false)
+                        2 -> {
+                            saveProject()
+                            val id = currentId
+                            if (id != null && store.duplicate(id) != null) toast("Projeto duplicado") else toast("Nada para duplicar ainda")
+                        }
+                        3 -> {
+                            saveProject()
+                            toast("Projeto salvo")
+                        }
+                        4 -> if (exporting) cancelExport() else exportDialog()
+                    }
+                }
+        )
+    }
+
+    private fun clearExportCache() {
+        if (exporting) {
+            toast("Espere a exportação terminar")
+            return
+        }
+        var bytes = 0L
+        cacheDir.listFiles()?.filter { it.isFile && it.name.startsWith("saida_") }?.forEach {
+            bytes += it.length()
+            it.delete()
+        }
+        toast("Liberados ${(bytes / 1_000_000.0).roundToInt()} MB")
+    }
+
+    private fun aboutDialog() {
+        val v = try {
+            packageManager.getPackageInfo(packageName, 0).versionName
+        } catch (e: Exception) {
+            "?"
+        }
+        showStyled(
+            AlertDialog.Builder(this)
+                .setTitle("Editor de Vídeo")
+                .setMessage("Versão $v\nSem IA, sem conta e sem marca d'água. Seus projetos ficam só neste aparelho.")
+                .setPositiveButton("OK", null)
+        )
+    }
+
+    private fun addClipsFrom(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        pushUndo()
+        val firstNew = clips.size
+        uris.forEach {
+            keepAccess(it)
+            addClip(it)
+        }
+        if (clips.size > firstNew) {
+            selected = firstNew
+            afterEdit(firstNew, 0L)
+        }
+    }
+
+    /** Vídeos enviados por "Compartilhar" de outro app viram um projeto novo. */
+    @Suppress("DEPRECATION")
+    private fun handleShare(i: Intent?) {
+        if (i == null) return
+        if ((i.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return
+        val uris = ArrayList<Uri>()
+        when (i.action) {
+            Intent.ACTION_SEND -> {
+                val u = if (Build.VERSION.SDK_INT >= 33) {
+                    i.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    i.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                }
+                if (u != null) uris.add(u)
+            }
+            Intent.ACTION_SEND_MULTIPLE -> {
+                val l = if (Build.VERSION.SDK_INT >= 33) {
+                    i.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    i.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+                }
+                if (l != null) uris.addAll(l)
+            }
+            else -> return
+        }
+        setIntent(Intent(this, MainActivity::class.java))
+        if (uris.isNotEmpty()) importShared(uris)
+    }
+
+    /**
+     * O acesso a um vídeo compartilhado é temporário, então o app guarda uma cópia em `imports/`
+     * para o projeto continuar abrindo depois. Ocupa espaço; a cópia some quando o projeto é excluído.
+     */
+    private fun importShared(uris: List<Uri>) {
+        startNewProject("Compartilhado ${store.list().size + 1}", 0, false)
+        copyAndAdd(uris)
+    }
+
+    /** Copia os vídeos para `imports/` em segundo plano e os adiciona ao projeto aberto. */
+    private fun copyAndAdd(uris: List<Uri>) {
+        toast("Importando ${uris.size} vídeo(s)…")
+        val dir = File(filesDir, "imports").apply { mkdirs() }
+        val alvo = currentId
+        bgExec.execute {
+            val copias = ArrayList<Uri>()
+            uris.forEachIndexed { n, u ->
+                try {
+                    val nome = queryName(u).replace(Regex("[^A-Za-z0-9._-]"), "_")
+                    val dest = File(dir, "${System.currentTimeMillis()}${n}_$nome")
+                    contentResolver.openInputStream(u)?.use { ins -> dest.outputStream().use { ins.copyTo(it) } }
+                    if (dest.length() > 0L) copias.add(Uri.fromFile(dest))
+                } catch (e: Exception) {
+                    // esse vídeo ficou de fora
+                }
+            }
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                if (copias.isEmpty()) {
+                    toast("Não consegui importar o vídeo")
+                } else if (currentId != alvo) {
+                    toast("Importação terminou, mas você já mudou de projeto")
+                } else {
+                    addClipsFrom(copias)
+                }
+            }
+        }
+    }
+
+    private fun askNotifThenExport() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            askNotif.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            exportar()
+        }
     }
 
     private fun itemDialog(index: Int, sticker: Boolean, newText: String = "") {
@@ -1651,7 +2095,7 @@ class MainActivity : ComponentActivity() {
             view.text = t.text
             view.setTextSize(
                 TypedValue.COMPLEX_UNIT_PX,
-                shortSide * (if (t.sticker) stickerFactor[t.size] else sizeFactor[t.size])
+                shortSide * (if (t.sticker) TextLayout.stickerFactor[t.size] else TextLayout.sizeFactor[t.size])
             )
             view.setTextColor(t.color)
             if (!t.sticker) {
@@ -1751,7 +2195,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Clipe "escolhido" com um toque na linha do tempo: só então a barra de ações do clipe aparece. */
+    private var clipPicked = false
+    private var clipGroup: View? = null
+
     private fun selectClip(i: Int) {
+        if (i !in clips.indices) { // toque fora dos clipes
+            clipPicked = false
+            refreshTimeline()
+            return
+        }
+        clipPicked = !(clipPicked && i == selected) // tocar de novo no mesmo clipe solta
         selected = i
         refreshTimeline()
         showTool(currentTool)
@@ -1760,6 +2214,7 @@ class MainActivity : ComponentActivity() {
 
     private fun selectOnly(i: Int) {
         if (i !in clips.indices || i == selected) return
+        clipPicked = false
         selected = i
         refreshTimeline()
         showTool(currentTool)
@@ -1824,6 +2279,7 @@ class MainActivity : ComponentActivity() {
     private fun delClip() {
         if (sel() == null) return
         pushUndo()
+        clipPicked = false
         clips.removeAt(selected)
         selected = selected.coerceIn(0, (clips.size - 1).coerceAtLeast(0))
         afterEdit(selected, 0L)
@@ -1997,43 +2453,10 @@ class MainActivity : ComponentActivity() {
         try {
             val o = JSONObject()
             val ca = JSONArray()
-            for (c in clips) {
-                val j = JSONObject()
-                j.put("uri", c.uri.toString())
-                j.put("name", c.name)
-                j.put("dur", c.durationMs)
-                j.put("w", c.w)
-                j.put("h", c.h)
-                j.put("start", c.startMs)
-                j.put("end", c.endMs)
-                j.put("speed", c.speed.toDouble())
-                j.put("rot", c.rotation)
-                j.put("flip", c.flip)
-                j.put("filter", c.filter)
-                j.put("bri", c.brightness)
-                j.put("con", c.contrast)
-                j.put("sat", c.sat)
-                j.put("vol", c.vol)
-                j.put("zoom", c.zoom)
-                j.put("px", c.panX)
-                j.put("py", c.panY)
-                j.put("ken", c.ken)
-                ca.put(j)
-            }
+            for (c in clips) ca.put(ProjectJson.clipToJson(c))
             o.put("clips", ca)
             val ta = JSONArray()
-            for (t in texts) {
-                val j = JSONObject()
-                j.put("text", t.text)
-                j.put("start", t.startMs)
-                j.put("end", t.endMs)
-                j.put("pos", t.pos)
-                j.put("size", t.size)
-                j.put("color", t.color)
-                j.put("posX", t.posX)
-                j.put("sticker", t.sticker)
-                ta.put(j)
-            }
+            for (t in texts) ta.put(ProjectJson.textToJson(t))
             o.put("texts", ta)
             o.put("selected", selected)
             o.put("musicUri", musicUri?.toString() ?: "")
@@ -2052,7 +2475,17 @@ class MainActivity : ComponentActivity() {
             o.put("fit", fitIdx)
             o.put("fadeIn", fadeInIdx)
             o.put("fadeOut", fadeOutIdx)
-            getSharedPreferences("editor", MODE_PRIVATE).edit().putString("project", o.toString()).apply()
+            o.put("schema", 2)
+            o.put("updated", System.currentTimeMillis())
+            o.put("totalMs", totalMs())
+            o.put("clipCount", clips.size)
+            var id = currentId
+            if (id == null) {
+                if (clips.isEmpty() && texts.isEmpty()) return
+                id = store.newId()
+                currentId = id
+            }
+            if (store.write(id, o.toString())) saveThumb(id)
         } catch (e: Exception) {
             // não conseguiu salvar, segue o jogo
         }
@@ -2064,44 +2497,27 @@ class MainActivity : ComponentActivity() {
         false
     }
 
-    private fun loadProject() {
-        val s = getSharedPreferences("editor", MODE_PRIVATE).getString("project", null) ?: return
+    private fun loadFromJson(s: String) {
+        var missing = 0
         try {
             val o = JSONObject(s)
             val ca = o.optJSONArray("clips") ?: return
             for (i in 0 until ca.length()) {
                 val j = ca.getJSONObject(i)
                 val uri = Uri.parse(j.getString("uri"))
-                if (!canRead(uri)) continue
-                val c = Clip(uri, j.optString("name", "clipe"), j.getLong("dur"), j.getInt("w"), j.getInt("h"))
-                c.startMs = j.optLong("start", 0L)
-                c.endMs = j.optLong("end", c.durationMs)
-                c.speed = j.optDouble("speed", 1.0).toFloat()
-                c.rotation = j.optInt("rot", 0)
-                c.flip = j.optBoolean("flip", false)
-                c.filter = j.optInt("filter", 0)
-                c.brightness = j.optInt("bri", 0)
-                c.contrast = j.optInt("con", 0)
-                c.sat = j.optInt("sat", 0)
-                c.vol = j.optInt("vol", 100)
-                c.zoom = j.optInt("zoom", 100)
-                c.panX = j.optInt("px", 0)
-                c.panY = j.optInt("py", 0)
-                c.ken = j.optInt("ken", 0)
+                if (!canRead(uri)) {
+                    missing++
+                    continue
+                }
+                val c = ProjectJson.clipFromJson(j, uri)
                 clips.add(c)
                 loadThumb(c)
             }
+            if (missing > 0) toast("$missing vídeo(s) não foram encontrados e ficaram de fora")
             val ta = o.optJSONArray("texts")
             if (ta != null) {
                 for (i in 0 until ta.length()) {
-                    val j = ta.getJSONObject(i)
-                    texts.add(
-                        TextItem(
-                            j.getString("text"), j.getLong("start"), j.getLong("end"),
-                            j.optInt("pos", 2), j.optInt("size", 1), j.optInt("color", Color.WHITE),
-                            j.optInt("posX", 1), j.optBoolean("sticker", false)
-                        )
-                    )
+                    texts.add(ProjectJson.textFromJson(ta.getJSONObject(i)))
                 }
             }
             val mu = o.optString("musicUri", "")
@@ -2130,210 +2546,52 @@ class MainActivity : ComponentActivity() {
             if (clips.isNotEmpty()) {
                 selected = o.optInt("selected", 0).coerceIn(0, clips.size - 1)
                 afterEdit(selected, 0L)
-                toast("Projeto anterior restaurado")
             }
         } catch (e: Exception) {
             clips.clear()
             texts.clear()
+            toast("Não consegui abrir este projeto por completo")
         }
-    }
-
-    // ------------------------------------------------------------------ efeitos
-
-    private fun filterEffects(i: Int): List<Effect> = when (i) {
-        1 -> listOf(RgbFilter.createGrayscaleFilter())
-        2 -> listOf(HslAdjustment.Builder().adjustSaturation(35f).build(), Contrast(0.15f))
-        3 -> listOf(RgbAdjustment.Builder().setRedScale(1.15f).setGreenScale(1.0f).setBlueScale(0.88f).build())
-        4 -> listOf(RgbAdjustment.Builder().setRedScale(0.88f).setGreenScale(1.0f).setBlueScale(1.15f).build())
-        5 -> listOf(RgbFilter.createInvertedFilter())
-        6 -> listOf(sepiaEffect())
-        7 -> listOf(
-            HslAdjustment.Builder().adjustSaturation(-15f).build(),
-            RgbAdjustment.Builder().setRedScale(1.06f).setGreenScale(0.98f).setBlueScale(1.06f).build(),
-            Contrast(0.3f)
-        )
-        8 -> listOf(
-            RgbAdjustment.Builder().setRedScale(1.1f).setGreenScale(1.0f).setBlueScale(0.8f).build(),
-            HslAdjustment.Builder().adjustSaturation(-20f).build(),
-            Contrast(-0.15f)
-        )
-        9 -> listOf(HslAdjustment.Builder().adjustSaturation(-30f).build(), Contrast(0.4f))
-        10 -> listOf(RgbFilter.createGrayscaleFilter(), Contrast(0.4f))
-        11 -> listOf(Contrast(-0.3f), Brightness(0.08f))
-        else -> emptyList()
-    }
-
-    private fun sepiaEffect(): Effect = object : RgbMatrix {
-        override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray = floatArrayOf(
-            0.393f, 0.349f, 0.272f, 0f,
-            0.769f, 0.686f, 0.534f, 0f,
-            0.189f, 0.168f, 0.131f, 0f,
-            0f, 0f, 0f, 1f
-        )
-    }
-
-    private fun zoomEffect(c: Clip, export: Boolean): Effect {
-        val base = c.zoom / 100f
-        val px = c.panX / 100f
-        val py = c.panY / 100f
-        val ken = if (export) c.ken else 0
-        val durUs = ((c.endMs - c.startMs) * 1000L).coerceAtLeast(1L).toFloat()
-        return object : MatrixTransformation {
-            override fun getMatrix(presentationTimeUs: Long): Matrix {
-                val p = (presentationTimeUs / durUs).coerceIn(0f, 1f)
-                var s = base
-                when (ken) {
-                    1 -> s = base * (1f + 0.3f * p)
-                    2 -> s = base * (1.3f - 0.3f * p)
-                    3, 4 -> s = base * 1.25f
-                }
-                val room = s - 1f
-                var tx = -px * room
-                val ty = py * room
-                if (ken == 3) tx = room * (1f - 2f * p)
-                if (ken == 4) tx = room * (2f * p - 1f)
-                val m = Matrix()
-                m.postScale(s, s)
-                m.postTranslate(tx, ty)
-                return m
-            }
-        }
-    }
-
-    private fun videoEffects(c: Clip, export: Boolean): List<Effect> {
-        val v = ArrayList<Effect>()
-        if (c.rotation != 0 || c.flip) {
-            v.add(
-                ScaleAndRotateTransformation.Builder()
-                    .setRotationDegrees(-c.rotation.toFloat())
-                    .setScale(if (c.flip) -1f else 1f, 1f)
-                    .build()
-            )
-        }
-        if (c.zoom != 100 || c.panX != 0 || c.panY != 0 || (export && c.ken != 0)) {
-            v.add(zoomEffect(c, export))
-        }
-        v.addAll(filterEffects(c.filter))
-        if (c.sat != 0) v.add(HslAdjustment.Builder().adjustSaturation(c.sat.toFloat()).build())
-        if (c.brightness != 0) v.add(Brightness(c.brightness / 100f))
-        if (c.contrast != 0) v.add(Contrast(c.contrast / 100f))
-        return v
     }
 
     // ------------------------------------------------------------------ exportação
 
-    private fun outputSize(): Pair<Int, Int> {
-        val first = clips.first()
-        return TimelineMath.outputSize(first.w, first.h, first.rotation, aspectRatios[aspectIdx], qualityShort[qualityIdx])
-    }
+    private fun exportSettings() = ExportSettings(
+        aspectRatio = aspectRatios[aspectIdx],
+        shortSide = qualityShort[qualityIdx],
+        cropToFill = fitIdx == 0,
+        muteOriginal = muteOriginal,
+        fadeInMs = fadeMs[fadeInIdx],
+        fadeOutMs = fadeMs[fadeOutIdx],
+        transType = transType,
+        transHalfMs = transDur[transIdx] / 2,
+        music = musicUri?.let { ExtraAudio(it, musicDurMs, musicVol) },
+        voice = voiceUri?.let { ExtraAudio(it, voiceDurMs, voiceVol) }
+    )
 
-    private fun audioItem(uri: Uri, durMs: Long, vol: Int): EditedMediaItem {
-        val cb = MediaItem.ClippingConfiguration.Builder()
-        if (durMs > 0L) cb.setEndPositionMs(min(durMs, totalMs()))
-        val media = MediaItem.Builder().setUri(uri).setClippingConfiguration(cb.build()).build()
-        val ap = ArrayList<AudioProcessor>()
-        if (vol != 100) ap.add(GainProcessor(vol / 100f))
-        return EditedMediaItem.Builder(media)
-            .setRemoveVideo(true)
-            .setEffects(Effects(ap, emptyList<Effect>()))
-            .build()
-    }
+    private fun outputSize(): Pair<Int, Int> = ExportComposition.outputSize(clips, exportSettings())
 
     private fun exportar() {
         if (clips.isEmpty()) {
             toast("Adicione vídeos primeiro")
             return
         }
+        if (extractingAudio || analysingSilence) {
+            toast("Espere a extração ou a análise de áudio terminar.")
+            return
+        }
         if (recording) stopRecording()
         player.pause()
 
-        val items = ArrayList<EditedMediaItem>()
-        for (c in clips) {
-            val clipping = MediaItem.ClippingConfiguration.Builder()
-                .setStartPositionMs(c.startMs)
-                .setEndPositionMs(c.endMs)
-                .build()
-            val mi = MediaItem.Builder().setUri(c.uri).setClippingConfiguration(clipping).build()
-
-            val v = ArrayList<Effect>(videoEffects(c, true))
-            val a = ArrayList<AudioProcessor>()
-            if (c.speed != 1f) {
-                v.add(SpeedChangeEffect(c.speed))
-                if (!muteOriginal) {
-                    val sonic = SonicAudioProcessor()
-                    sonic.setSpeed(c.speed)
-                    a.add(sonic)
-                }
-            }
-            if (!muteOriginal && c.vol != 100) a.add(GainProcessor(c.vol / 100f))
-
-            items.add(
-                EditedMediaItem.Builder(mi)
-                    .setRemoveAudio(muteOriginal)
-                    .setEffects(Effects(a, v))
-                    .build()
-            )
+        val (sw, sh) = outputSize()
+        val need = ExportHelpers.estimatedBytes(videoBitrate(sw, sh), totalMs())
+        if (!ExportHelpers.hasRoom(cacheDir.usableSpace, need)) {
+            toast("Pouco espaço livre. Libere cerca de ${need * 2 / 1_000_000 + 50} MB e tente de novo.")
+            return
         }
 
         val (ow, oh) = outputSize()
-        val layout = if (fitIdx == 0) Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP else Presentation.LAYOUT_SCALE_TO_FIT
-        val compEffects = ArrayList<Effect>()
-        compEffects.add(Presentation.createForWidthAndHeight(ow, oh, layout))
-
-        val shortOut = min(ow, oh)
-        val overlays = ArrayList<TextureOverlay>()
-        for (t in texts) {
-            val sp = SpannableString(t.text)
-            val len = sp.length
-            val flags = Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-            val factor = if (t.sticker) stickerFactor[t.size] else sizeFactor[t.size]
-            sp.setSpan(AbsoluteSizeSpan((shortOut * factor).toInt()), 0, len, flags)
-            if (!t.sticker) {
-                sp.setSpan(ForegroundColorSpan(t.color), 0, len, flags)
-                sp.setSpan(StyleSpan(Typeface.BOLD), 0, len, flags)
-                val bgColor = if (t.color == Color.BLACK) 0x99FFFFFF.toInt() else 0x66000000
-                sp.setSpan(BackgroundColorSpan(bgColor), 0, len, flags)
-            }
-            val y = posY[t.pos]
-            val x = posXv[t.posX]
-            val shown = OverlaySettings.Builder().setBackgroundFrameAnchor(x, y).build()
-            val hidden = OverlaySettings.Builder().setBackgroundFrameAnchor(x, y).setAlphaScale(0f).build()
-            overlays.add(TimedText(t, sp, shown, hidden))
-        }
-        if (overlays.isNotEmpty()) compEffects.add(OverlayEffect(ImmutableList.copyOf(overlays)))
-
-        val fi = fadeMs[fadeInIdx]
-        val fo = fadeMs[fadeOutIdx]
-        val compAudio = ArrayList<AudioProcessor>()
-        if (fi > 0L || fo > 0L) {
-            // bitmap mínimo: o overlay é esticado ao quadro, então não precisa ter o tamanho do vídeo
-            val black = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
-            black.eraseColor(Color.BLACK)
-            val fadeList = ArrayList<TextureOverlay>()
-            fadeList.add(FadeOverlay(black, totalMs(), fi, fo))
-            compEffects.add(OverlayEffect(ImmutableList.copyOf(fadeList)))
-            compAudio.add(FadeProcessor(fi, fo, totalMs()))
-        }
-
-        if (transType != 0 && clips.size > 1) {
-            val bounds = TimelineMath.boundaries(clips.map { it.effMs })
-            val tb = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
-            tb.eraseColor(if (transType == 1) Color.BLACK else Color.WHITE)
-            val tl = ArrayList<TextureOverlay>()
-            tl.add(TransitionOverlay(tb, bounds, transDur[transIdx] / 2))
-            compEffects.add(OverlayEffect(ImmutableList.copyOf(tl)))
-        }
-
-        val seqs = ArrayList<EditedMediaItemSequence>()
-        seqs.add(EditedMediaItemSequence(items))
-        val mu = musicUri
-        if (mu != null) seqs.add(EditedMediaItemSequence(listOf(audioItem(mu, musicDurMs, musicVol))))
-        val vu = voiceUri
-        if (vu != null) seqs.add(EditedMediaItemSequence(listOf(audioItem(vu, voiceDurMs, voiceVol))))
-
-        val composition = Composition.Builder(seqs)
-            .setEffects(Effects(compAudio, compEffects))
-            .build()
+        val composition = ExportComposition.build(clips, texts, exportSettings())
 
         val saida = File(cacheDir, "saida_${System.currentTimeMillis()}.mp4")
 
@@ -2350,6 +2608,8 @@ class MainActivity : ComponentActivity() {
                 override fun onCompleted(composition: Composition, exportResult: ExportResult) {
                     setExporting(false)
                     val uri = salvarNaGaleria(saida)
+                    ExportService.finish(applicationContext, "Vídeo pronto em Filmes/EditorVideo.", uri)
+                    if (isDestroyed) return
                     statusTv.text = "Pronto! Salvo em Filmes/EditorVideo."
                     val fileUri = uri ?: Uri.fromFile(saida)
                     showStyled(
@@ -2388,7 +2648,9 @@ class MainActivity : ComponentActivity() {
                     exportException: ExportException
                 ) {
                     setExporting(false)
-                    statusTv.text = "Erro ao exportar: ${exportException.message}"
+                    ExportService.finish(applicationContext, "A exportação falhou.", null)
+                    if (isDestroyed) return
+                    statusTv.text = "Erro ao exportar: " + ExportHelpers.friendlyError(exportException.errorCode)
                 }
             })
             .build()
@@ -2396,6 +2658,12 @@ class MainActivity : ComponentActivity() {
 
         statusTv.text = "Exportando…"
         setExporting(true)
+        ExportService.onCancel = { runOnUiThread { cancelExport() } }
+        try {
+            ExportService.start(this)
+        } catch (e: Exception) {
+            // sem serviço, a exportação ainda roda enquanto o app estiver aberto
+        }
         t.start(composition, saida.absolutePath)
     }
 
@@ -2409,7 +2677,87 @@ class MainActivity : ComponentActivity() {
     private fun cancelExport() {
         transformer?.cancel()
         setExporting(false)
+        ExportService.finish(applicationContext, "Exportação cancelada.", null)
         statusTv.text = "Exportação cancelada."
+    }
+
+    /**
+     * Salva só o som do clipe (trecho cortado, velocidade, volume e fades do clipe) como .m4a em Música/EditorVideo.
+     * Ignora "Remover áudio original": o pedido explícito de extrair vale mais.
+     */
+    private fun extrairAudio(c: Clip) {
+        if (exporting || extractingAudio) {
+            toast("Espere a exportação ou extração em andamento terminar.")
+            return
+        }
+        player.pause()
+        val clipping = MediaItem.ClippingConfiguration.Builder()
+            .setStartPositionMs(c.startMs)
+            .setEndPositionMs(c.endMs)
+            .build()
+        val mi = MediaItem.Builder().setUri(c.uri).setClippingConfiguration(clipping).build()
+        val a = clipAudioProcessors(c)
+        val item = EditedMediaItem.Builder(mi)
+            .setRemoveVideo(true)
+            .setEffects(Effects(a, emptyList<Effect>()))
+            .build()
+
+        val base = c.name.substringBeforeLast('.').ifBlank { "audio" }
+            .replace(Regex("[^A-Za-z0-9_-]"), "_").take(40)
+        val saida = File(cacheDir, "${base}_${System.currentTimeMillis()}.m4a")
+        val t = Transformer.Builder(this)
+            .setAudioMimeType(MimeTypes.AUDIO_AAC)
+            .addListener(object : Transformer.Listener {
+                override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                    extractingAudio = false
+                    val ok = salvarAudio(saida)
+                    if (isDestroyed) return
+                    statusTv.text = if (ok) "Áudio salvo em Música/EditorVideo." else "Não consegui salvar o áudio."
+                    toast(statusTv.text.toString())
+                }
+
+                override fun onError(
+                    composition: Composition,
+                    exportResult: ExportResult,
+                    exportException: ExportException
+                ) {
+                    extractingAudio = false
+                    saida.delete()
+                    if (isDestroyed) return
+                    statusTv.text = "Erro ao extrair o áudio: " + ExportHelpers.friendlyError(exportException.errorCode)
+                }
+            })
+            .build()
+        extractingAudio = true
+        statusTv.text = "Extraindo áudio…"
+        try {
+            t.start(item, saida.absolutePath)
+        } catch (e: Exception) {
+            extractingAudio = false
+            statusTv.text = "Não consegui iniciar a extração do áudio."
+        }
+    }
+
+    private fun salvarAudio(arquivo: File): Boolean {
+        return try {
+            val values = ContentValues().apply {
+                put(MediaStore.Audio.Media.DISPLAY_NAME, arquivo.name)
+                put(MediaStore.Audio.Media.MIME_TYPE, "audio/mp4")
+                put(MediaStore.Audio.Media.RELATIVE_PATH, "Music/EditorVideo")
+            }
+            val uri = contentResolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
+            if (uri == null) {
+                false
+            } else {
+                contentResolver.openOutputStream(uri)?.use { out ->
+                    arquivo.inputStream().use { it.copyTo(out) }
+                }
+                arquivo.delete()
+                true
+            }
+        } catch (e: Exception) {
+            false
+        }
     }
 
     private fun salvarNaGaleria(arquivo: File): Uri? {
