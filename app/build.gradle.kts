@@ -15,8 +15,8 @@ android {
         applicationId = "com.editorvideo"
         minSdk = 29
         targetSdk = 34
-        versionCode = 18
-        versionName = "3.3.0"
+        versionCode = 19
+        versionName = "3.3.1"
     }
 
     signingConfigs {
