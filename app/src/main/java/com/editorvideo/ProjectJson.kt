@@ -32,6 +32,7 @@ internal object ProjectJson {
         j.put("px", c.panX)
         j.put("py", c.panY)
         j.put("ken", c.ken)
+        if (c.isImage) j.put("img", true)
         return j
     }
 
@@ -47,6 +48,7 @@ internal object ProjectJson {
         c.brightness = j.optInt("bri", 0)
         c.contrast = j.optInt("con", 0)
         c.sat = j.optInt("sat", 0)
+        c.isImage = j.optBoolean("img", false)
         c.vol = j.optInt("vol", 100)
         c.fadeIn = j.optInt("fin", 0)
         c.fadeOut = j.optInt("fout", 0)

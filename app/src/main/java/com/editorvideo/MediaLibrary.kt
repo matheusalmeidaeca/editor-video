@@ -30,6 +30,12 @@ internal fun MainActivity.showMediaLibrary() {
             )
         ),
         LibTab(
+            "🖼️", "Foto", listOf(
+                Triple("🖼️", "Galeria de fotos") { openPhotoGallery() },
+                Triple("📁", "Foto de arquivo") { pickPhotoFiles.launch(arrayOf("image/*")) }
+            )
+        ),
+        LibTab(
             "🎵", "Música", listOf(
                 Triple("🎵", "Música de arquivo") { pickMusic.launch(arrayOf("audio/*")) },
                 Triple("🎙️", "Gravação de voz") { requestRecord() }

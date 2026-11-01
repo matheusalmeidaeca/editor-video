@@ -222,6 +222,10 @@ internal fun MainActivity.cancelExport() {
  * Ignora "Remover áudio original": o pedido explícito de extrair vale mais.
  */
 internal fun MainActivity.extrairAudio(c: Clip) {
+    if (c.isImage) {
+        toast("Fotos não têm áudio.")
+        return
+    }
     if (exporting || extractingAudio) {
         toast("Espere a exportação ou extração em andamento terminar.")
         return

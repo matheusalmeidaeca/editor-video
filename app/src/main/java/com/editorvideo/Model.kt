@@ -30,8 +30,14 @@ internal class Clip(val uri: Uri, val name: String, val durationMs: Long, val w:
     var panY = 0
     var ken = 0
     var thumb: Bitmap? = null
+    var isImage = false  // foto: sem áudio nem velocidade; a duração é endMs - startMs (v3.3.11)
 
-    val effMs: Long get() = TimelineMath.effMs(startMs, endMs, speed)
+    val effMs: Long get() = if (isImage) endMs - startMs else TimelineMath.effMs(startMs, endMs, speed)
+
+    companion object {
+        const val IMAGE_MAX_MS = 60_000L      // limite do controle de duração da foto
+        const val IMAGE_DEFAULT_MS = 4_000L   // duração inicial de uma foto na linha do tempo
+    }
 
     fun copy(): Clip {
         val c = Clip(uri, name, durationMs, w, h)
@@ -52,6 +58,7 @@ internal class Clip(val uri: Uri, val name: String, val durationMs: Long, val w:
         c.panY = panY
         c.ken = ken
         c.thumb = thumb
+        c.isImage = isImage
         return c
     }
 }

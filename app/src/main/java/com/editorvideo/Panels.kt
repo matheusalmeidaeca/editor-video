@@ -110,6 +110,12 @@ import kotlin.math.roundToInt
 internal fun MainActivity.panelTrim(): View {
     val c = sel() ?: return hint()
     val box = vbox()
+    if (c.isImage) {
+        box.addView(tv("Foto selecionada: escolha por quanto tempo ela aparece."))
+        labeledSeek(box, { "Duração: ${it / 10},${it % 10} s" }, 5, (Clip.IMAGE_MAX_MS / 100).toInt(),
+            ((c.endMs - c.startMs) / 100L).toInt(), { c.endMs = c.startMs + it * 100L }, { pushUndo() }, { afterEdit(selected, 0L) })
+        return box
+    }
     val l1 = tv("", 13f)
     val l2 = tv("", 13f)
     fun upd() {
@@ -153,6 +159,10 @@ internal fun MainActivity.panelTrim(): View {
  */
 internal fun MainActivity.removerSilencios() {
     val c = sel() ?: return
+    if (c.isImage) {
+        toast("Fotos não têm áudio.")
+        return
+    }
     if (analysingSilence || exporting || extractingAudio) {
         toast("Espere o processo em andamento terminar.")
         return
@@ -244,6 +254,10 @@ internal fun MainActivity.trimHere(isEnd: Boolean) {
 internal fun MainActivity.panelSpeed(): View {
     val c = sel() ?: return hint()
     val box = vbox()
+    if (c.isImage) {
+        box.addView(tv("Fotos não têm velocidade. Mude o tempo de exibição em Cortar.", 13f, cGrey))
+        return box
+    }
     box.addView(tv("Velocidade do clipe selecionado (o áudio acompanha)."))
     box.addView(chipRow(speeds.map { "${fmtSpeed(it)}x" }, speeds.indexOf(c.speed)) { i ->
         pushUndo()
@@ -423,6 +437,10 @@ internal fun MainActivity.addSticker(e: String) {
  * Na prévia o volume não passa de 100%; o ganho acima disso vale na exportação.
  */
 internal fun MainActivity.normalizarVolume(c: Clip) {
+    if (c.isImage) {
+        toast("Fotos não têm áudio.")
+        return
+    }
     val wd = waveFor(c.uri, c.durationMs)
     if (wd == null) {
         toast("A forma de onda ainda está sendo analisada, ou o clipe não tem som. Tente de novo em alguns segundos.")
@@ -452,6 +470,8 @@ internal fun MainActivity.panelAudio(): View {
     val c = sel()
     if (c == null) {
         box.addView(hint())
+    } else if (c.isImage) {
+        box.addView(tv("Fotos não têm áudio. Use música ou narração no projeto.", 12f, cGrey))
     } else {
         labeledSeek(box, { "Volume: $it%" }, 0, 200, c.vol, { c.vol = it }, { pushUndo() }, {
             applyVolume()

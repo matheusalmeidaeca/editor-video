@@ -78,15 +78,25 @@ internal object ExportComposition {
 
         val items = ArrayList<EditedMediaItem>()
         for (c in clips) {
+            val v = ArrayList<Effect>(videoEffects(c, true))
+            val a = ArrayList<AudioProcessor>()
+            if (c.isImage) {
+                // foto: duração fixa, sem áudio nem velocidade; 30 fps é o padrão recomendado para imagens
+                val mi = MediaItem.Builder().setUri(c.uri).setImageDurationMs(c.endMs - c.startMs).build()
+                items.add(
+                    EditedMediaItem.Builder(mi)
+                        .setFrameRate(30)
+                        .setEffects(Effects(a, v))
+                        .build()
+                )
+                continue
+            }
             val clipping = MediaItem.ClippingConfiguration.Builder()
                 .setStartPositionMs(c.startMs)
                 .setEndPositionMs(c.endMs)
                 .build()
             val mi = MediaItem.Builder().setUri(c.uri).setClippingConfiguration(clipping).build()
-
-            val v = ArrayList<Effect>(videoEffects(c, true))
             if (c.speed != 1f) v.add(SpeedChangeEffect(c.speed))
-            val a = ArrayList<AudioProcessor>()
             if (!s.muteOriginal) a.addAll(clipAudioProcessors(c))
 
             items.add(
@@ -148,7 +158,7 @@ internal object ExportComposition {
         }
 
         val seqs = ArrayList<EditedMediaItemSequence>()
-        seqs.add(seqOf(items))
+        seqs.add(seqOf(items, clips.any { it.isImage }))
         s.music?.let { seqs.add(seqOf(listOf(audioItem(it, totalMs)))) }
         s.voice?.let { seqs.add(seqOf(listOf(audioItem(it, totalMs)))) }
 
@@ -159,8 +169,10 @@ internal object ExportComposition {
 }
 
 /** Monta uma faixa pelo Builder (os construtores diretos são obsoletos desde o Media3 1.5). */
-internal fun seqOf(list: List<EditedMediaItem>): EditedMediaItemSequence {
+internal fun seqOf(list: List<EditedMediaItem>, forceAudio: Boolean = false): EditedMediaItemSequence {
     val b = EditedMediaItemSequence.Builder()
+    // com fotos na faixa, o primeiro item pode não ter áudio; a Media3 exige a faixa de áudio forçada
+    if (forceAudio) b.experimentalSetForceAudioTrack(true)
     for (item in list) b.addItem(item)
     return b.build()
 }

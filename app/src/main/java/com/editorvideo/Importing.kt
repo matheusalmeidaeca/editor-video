@@ -17,6 +17,7 @@ import android.graphics.Matrix
 import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.media.ExifInterface
 import android.media.MediaCodecList
 import android.media.MediaMetadataRetriever
 import android.media.MediaRecorder
@@ -161,7 +162,7 @@ internal fun MainActivity.importShared(uris: List<Uri>) {
 
 /** Copia os vídeos para `imports/` em segundo plano e os adiciona ao projeto aberto. */
 internal fun MainActivity.copyAndAdd(uris: List<Uri>) {
-    toast("Importando ${uris.size} vídeo(s)…")
+    toast("Importando ${uris.size} arquivo(s)…")
     val dir = File(filesDir, "imports").apply { mkdirs() }
     val alvo = currentId
     bgExec.execute {
@@ -179,7 +180,7 @@ internal fun MainActivity.copyAndAdd(uris: List<Uri>) {
         runOnUiThread {
             if (isDestroyed) return@runOnUiThread
             if (copias.isEmpty()) {
-                toast("Não consegui importar o vídeo")
+                toast("Não consegui importar o arquivo")
             } else if (currentId != alvo) {
                 toast("Importação terminou, mas você já mudou de projeto")
             } else {
@@ -189,7 +190,52 @@ internal fun MainActivity.copyAndAdd(uris: List<Uri>) {
     }
 }
 
+/** Foto ou vídeo? Usa o tipo informado pelo sistema e, sem ele (arquivo copiado), a extensão. */
+internal fun MainActivity.isImageUri(uri: Uri): Boolean {
+    val t = try {
+        contentResolver.getType(uri)
+    } catch (e: Exception) {
+        null
+    }
+    if (t != null) return t.startsWith("image/")
+    val ext = (uri.lastPathSegment ?: "").substringAfterLast('.', "").lowercase()
+    return ext in setOf("jpg", "jpeg", "png", "webp", "heic", "heif", "bmp")
+}
+
+/** Lê o tamanho de uma foto sem carregá-la inteira. A orientação do EXIF troca largura e altura. */
+internal fun MainActivity.imageSize(uri: Uri): Pair<Int, Int> {
+    val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    try {
+        contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, o) }
+    } catch (e: Exception) {
+        return Pair(0, 0)
+    }
+    val ori = try {
+        contentResolver.openInputStream(uri)?.use {
+            ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+        } ?: ExifInterface.ORIENTATION_NORMAL
+    } catch (e: Exception) {
+        ExifInterface.ORIENTATION_NORMAL
+    }
+    val troca = ori == ExifInterface.ORIENTATION_ROTATE_90 || ori == ExifInterface.ORIENTATION_ROTATE_270 ||
+        ori == ExifInterface.ORIENTATION_TRANSPOSE || ori == ExifInterface.ORIENTATION_TRANSVERSE
+    return if (troca) Pair(o.outHeight, o.outWidth) else Pair(o.outWidth, o.outHeight)
+}
+
 internal fun MainActivity.addClip(uri: Uri) {
+    if (isImageUri(uri)) {
+        val (iw, ih) = imageSize(uri)
+        if (iw <= 0 || ih <= 0) {
+            toast("Não consegui abrir essa foto")
+            return
+        }
+        val c = Clip(uri, queryName(uri), Clip.IMAGE_MAX_MS, iw, ih)
+        c.isImage = true
+        c.endMs = Clip.IMAGE_DEFAULT_MS
+        clips.add(c)
+        loadThumb(c)
+        return
+    }
     val r = MediaMetadataRetriever()
     try {
         r.setDataSource(this, uri)
@@ -217,6 +263,27 @@ internal fun MainActivity.addClip(uri: Uri) {
 }
 
 internal fun MainActivity.loadThumb(c: Clip) {
+    if (c.isImage) {
+        bgExec.execute {
+            try {
+                val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                contentResolver.openInputStream(c.uri)?.use { BitmapFactory.decodeStream(it, null, o) }
+                val o2 = BitmapFactory.Options().apply { inSampleSize = (o.outHeight / 256).coerceAtLeast(1) }
+                val bmp = contentResolver.openInputStream(c.uri)?.use { BitmapFactory.decodeStream(it, null, o2) }
+                if (bmp != null) {
+                    val wTh = (bmp.width * 128f / bmp.height).toInt().coerceAtLeast(1)
+                    val th = Bitmap.createScaledBitmap(bmp, wTh, 128, true)
+                    runOnUiThread {
+                        c.thumb = th
+                        refreshTimeline()
+                    }
+                }
+            } catch (e: Exception) {
+                // sem miniatura, tudo bem
+            }
+        }
+        return
+    }
     bgExec.execute {
         val r = MediaMetadataRetriever()
         try {

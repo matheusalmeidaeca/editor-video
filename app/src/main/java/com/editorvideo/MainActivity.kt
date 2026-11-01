@@ -250,6 +250,19 @@ class MainActivity : ComponentActivity() {
         pickGallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
     }
 
+    // Fotos (v3.3.11): viram clipes de 4 s, com a duração ajustável em Cortar.
+    internal val pickPhotoFiles =
+        registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> addClipsFrom(uris) }
+
+    internal val pickPhotoGallery =
+        registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(30)) { uris ->
+            if (uris.isNotEmpty()) copyAndAdd(uris)
+        }
+
+    internal fun openPhotoGallery() {
+        pickPhotoGallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    }
+
     internal val pickMusic =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) {
@@ -627,7 +640,7 @@ class MainActivity : ComponentActivity() {
         emptyState.visibility = if (clips.isEmpty()) View.VISIBLE else View.GONE
         timeline.clips = clips.mapIndexed { i, c ->
             val extra = (if (c.speed != 1f) " ${fmtSpeed(c.speed)}x" else "") + (if (c.filter != 0) " 🎨" else "")
-            TimelineView.ClipInfo(c.effMs, c.thumb, "${i + 1} · ${fmt(c.effMs)}$extra", waveFor(c.uri, c.durationMs), c.startMs, c.speed)
+            TimelineView.ClipInfo(c.effMs, c.thumb, "${i + 1} · ${fmt(c.effMs)}$extra", if (c.isImage) null else waveFor(c.uri, c.durationMs), c.startMs, c.speed)
         }
         timeline.selected = if (clips.isEmpty()) -1 else selected
         timeline.bars = texts.map {
@@ -832,6 +845,12 @@ class MainActivity : ComponentActivity() {
             return
         }
         val items = clips.map { c ->
+            if (c.isImage) {
+                return@map MediaItem.Builder()
+                    .setUri(c.uri)
+                    .setImageDurationMs(c.endMs - c.startMs)
+                    .build()
+            }
             MediaItem.Builder()
                 .setUri(c.uri)
                 .setClippingConfiguration(
