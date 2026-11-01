@@ -74,7 +74,7 @@ class TimelineMathTest {
 
     @Test
     fun snap_empateFicaComOPrimeiroMaisPerto() {
-        assertEquals(1_000L, TimelineMath.snap(1_030L, listOf(1_000L, 1_050L), 100L))
+        assertEquals(1_000L, TimelineMath.snap(1_025L, listOf(1_000L, 1_050L), 100L))
     }
 
     @Test

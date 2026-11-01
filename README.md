@@ -1,4 +1,4 @@
-# Editor de Vídeo 3.2.9 (Android, Kotlin + Media3)
+# Editor de Vídeo 3.2.10 (Android, Kotlin + Media3)
 
 Sem IA. Visual "osmótico": fundo líquido animado, painéis de vidro e botões que respiram.
 
@@ -18,6 +18,9 @@ com nome e proporção (16:9, 9:16, 1:1, 4:3, 3:4, 4:5, 2.35:1), cortar à esque
 transições entre clipes (fade no preto ou no branco), menu radial de adição, diálogo
 "Salvar e compartilhar" (H.264/HEVC, resolução e qualidade com tamanho estimado) e layout
 próprio para a tela deitada.
+
+**Novidades da 3.2.10:**
+- Só correção de um teste unitário (`snap`): o valor do teste estava errado, o código estava certo.
 
 **Novidades da 3.2.9:**
 - **Ações do clipe só com seleção:** Duplicar, Excluir e Mover aparecem na barra de ações só depois de tocar num clipe
