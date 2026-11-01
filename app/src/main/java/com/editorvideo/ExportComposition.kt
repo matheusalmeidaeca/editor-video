@@ -145,12 +145,19 @@ internal object ExportComposition {
         }
 
         val seqs = ArrayList<EditedMediaItemSequence>()
-        seqs.add(EditedMediaItemSequence(items))
-        s.music?.let { seqs.add(EditedMediaItemSequence(listOf(audioItem(it, totalMs)))) }
-        s.voice?.let { seqs.add(EditedMediaItemSequence(listOf(audioItem(it, totalMs)))) }
+        seqs.add(seqOf(items))
+        s.music?.let { seqs.add(seqOf(listOf(audioItem(it, totalMs)))) }
+        s.voice?.let { seqs.add(seqOf(listOf(audioItem(it, totalMs)))) }
 
         return Composition.Builder(seqs)
             .setEffects(Effects(compAudio, compEffects))
             .build()
     }
+}
+
+/** Monta uma faixa pelo Builder (os construtores diretos são obsoletos desde o Media3 1.5). */
+internal fun seqOf(list: List<EditedMediaItem>): EditedMediaItemSequence {
+    val b = EditedMediaItemSequence.Builder()
+    for (item in list) b.addItem(item)
+    return b.build()
 }
