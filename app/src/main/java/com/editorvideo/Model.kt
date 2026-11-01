@@ -4,7 +4,8 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.text.SpannableString
 import androidx.media3.effect.BitmapOverlay
-import androidx.media3.effect.OverlaySettings
+import androidx.media3.common.OverlaySettings
+import androidx.media3.effect.StaticOverlaySettings
 import androidx.media3.effect.TextOverlay
 import kotlin.math.abs
 import kotlin.math.max
@@ -96,7 +97,7 @@ internal class FadeOverlay(
         if (outMs > 0L && ms > totalMs - outMs) {
             a = max(a, (ms - (totalMs - outMs)).toFloat() / outMs)
         }
-        return OverlaySettings.Builder()
+        return StaticOverlaySettings.Builder()
             .setScale(1.02f, 1.02f)
             .setAlphaScale(a.coerceIn(0f, 1f))
             .build()
@@ -118,7 +119,7 @@ internal class TransitionOverlay(
             val dist = abs(ms - b)
             if (dist < halfMs) a = max(a, 1f - dist.toFloat() / halfMs)
         }
-        return OverlaySettings.Builder()
+        return StaticOverlaySettings.Builder()
             .setScale(1.02f, 1.02f)
             .setAlphaScale(a.coerceIn(0f, 1f))
             .build()

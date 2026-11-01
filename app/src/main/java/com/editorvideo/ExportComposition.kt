@@ -14,7 +14,7 @@ import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.effect.OverlayEffect
-import androidx.media3.effect.OverlaySettings
+import androidx.media3.effect.StaticOverlaySettings
 import androidx.media3.effect.Presentation
 import androidx.media3.effect.SpeedChangeEffect
 import androidx.media3.effect.TextureOverlay
@@ -116,8 +116,8 @@ internal object ExportComposition {
             }
             val y = TextLayout.posY[t.pos]
             val x = TextLayout.posXv[t.posX]
-            val shown = OverlaySettings.Builder().setBackgroundFrameAnchor(x, y).build()
-            val hidden = OverlaySettings.Builder().setBackgroundFrameAnchor(x, y).setAlphaScale(0f).build()
+            val shown = StaticOverlaySettings.Builder().setBackgroundFrameAnchor(x, y).build()
+            val hidden = StaticOverlaySettings.Builder().setBackgroundFrameAnchor(x, y).setAlphaScale(0f).build()
             overlays.add(TimedText(t, sp, shown, hidden))
         }
         if (overlays.isNotEmpty()) compEffects.add(OverlayEffect(ImmutableList.copyOf(overlays)))
