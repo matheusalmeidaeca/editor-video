@@ -131,6 +131,7 @@ class MainActivity : ComponentActivity() {
     internal var transIdx by state::transIdx
     internal var codecIdx = 0
     internal var bitrateIdx = 1
+    internal var fpsIdx = 0
     internal var projectName by state::projectName
     internal var exporting = false
     internal var extractingAudio = false
@@ -1025,7 +1026,8 @@ class MainActivity : ComponentActivity() {
         transType = transType,
         transHalfMs = transDur[transIdx] / 2,
         music = musicUri?.let { ExtraAudio(it, musicDurMs, musicVol) },
-        voice = voiceUri?.let { ExtraAudio(it, voiceDurMs, voiceVol) }
+        voice = voiceUri?.let { ExtraAudio(it, voiceDurMs, voiceVol) },
+        maxFps = ExportHelpers.maxFps(fpsIdx)
     )
 
     internal fun outputSize(): Pair<Int, Int> = ExportComposition.outputSize(clips, exportSettings())

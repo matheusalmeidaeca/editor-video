@@ -186,6 +186,9 @@ internal fun MainActivity.exportDialog() {
     box.addView(chipGroup(qualityNames, qualityIdx) { qualityIdx = it; upd() })
     box.addView(section("Qualidade"), lpm(WRAP, WRAP, t = 12))
     box.addView(chipGroup(listOf("Baixa", "Média", "Alta"), bitrateIdx) { bitrateIdx = it; upd() })
+    box.addView(section("Quadros por segundo"), lpm(WRAP, WRAP, t = 12))
+    box.addView(chipGroup(ExportHelpers.fpsNames, fpsIdx) { fpsIdx = it })
+    box.addView(tv("Só reduz: um vídeo de 24 fps continua em 24. Menos quadros deixam o arquivo menor.", 11f, cGrey), lpm(WRAP, WRAP, t = 4))
     box.addView(info, lpm(WRAP, WRAP, t = 14))
     upd()
     dlg = showStyled(

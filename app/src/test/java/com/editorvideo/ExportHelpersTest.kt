@@ -10,6 +10,15 @@ import java.nio.file.Files
 class ExportHelpersTest {
 
     @Test
+    fun taxa_de_quadros_do_indice() {
+        assertEquals(0, ExportHelpers.maxFps(0))
+        assertEquals(30, ExportHelpers.maxFps(1))
+        assertEquals(24, ExportHelpers.maxFps(2))
+        assertEquals(0, ExportHelpers.maxFps(9))
+        assertEquals(3, ExportHelpers.fpsNames.size)
+    }
+
+    @Test
     fun predefinicoes_tem_valores_validos() {
         assertTrue(ExportPresets.all.isNotEmpty())
         for (p in ExportPresets.all) {

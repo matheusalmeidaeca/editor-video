@@ -13,6 +13,7 @@ import android.text.style.StyleSpan
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.effect.FrameDropEffect
 import androidx.media3.effect.OverlayEffect
 import androidx.media3.effect.StaticOverlaySettings
 import androidx.media3.effect.Presentation
@@ -49,7 +50,8 @@ internal class ExportSettings(
     val transType: Int,   // 0 nenhuma, 1 preto, 2 branco
     val transHalfMs: Long,
     val music: ExtraAudio?,
-    val voice: ExtraAudio?
+    val voice: ExtraAudio?,
+    val maxFps: Int = 0   // 0 = manter a original; senão limita (só reduz, nunca aumenta)
 )
 
 internal object ExportComposition {
@@ -121,6 +123,7 @@ internal object ExportComposition {
             overlays.add(TimedText(t, sp, shown, hidden))
         }
         if (overlays.isNotEmpty()) compEffects.add(OverlayEffect(ImmutableList.copyOf(overlays)))
+        if (s.maxFps > 0) compEffects.add(FrameDropEffect.createDefaultFrameDropEffect(s.maxFps.toFloat()))
 
         val fi = s.fadeInMs
         val fo = s.fadeOutMs

@@ -22,6 +22,16 @@ object ExportPresets {
 /** Traduz o código de erro da exportação e estima o espaço necessário. Sem Android, testável na JVM. */
 object ExportHelpers {
 
+    /** Opções de taxa de quadros do diálogo de exportação. */
+    val fpsNames = listOf("Original", "Máx. 30", "Máx. 24")
+
+    /** Limite de quadros por segundo do índice escolhido; 0 = sem limite. */
+    fun maxFps(idx: Int): Int = when (idx) {
+        1 -> 30
+        2 -> 24
+        else -> 0
+    }
+
     /**
      * As faixas de código seguem a numeração da Media3 (2xxx arquivo, 3xxx decodificador, 4xxx codificador,
      * 5xxx imagem, 6xxx áudio, 7xxx gravação do arquivo). [verificar] na subida do Media3 (v3.3).
