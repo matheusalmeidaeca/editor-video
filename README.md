@@ -1,4 +1,4 @@
-# Editor de Vídeo 3.2.10 (Android, Kotlin + Media3)
+# Editor de Vídeo 3.3.0 (Android, Kotlin + Media3)
 
 Sem IA. Visual "osmótico": fundo líquido animado, painéis de vidro e botões que respiram.
 
@@ -18,6 +18,15 @@ com nome e proporção (16:9, 9:16, 1:1, 4:3, 3:4, 4:5, 2.35:1), cortar à esque
 transições entre clipes (fade no preto ou no branco), menu radial de adição, diálogo
 "Salvar e compartilhar" (H.264/HEVC, resolução e qualidade com tamanho estimado) e layout
 próprio para a tela deitada.
+
+**Novidades da 3.3.0 (sem mudança para quem usa):**
+- Primeira etapa da subida do Media3, de 1.4.1 para 1.5.1, com `compileSdk` 35. O `targetSdk` continua em 34.
+  Tudo deve funcionar como antes; a mudança prepara fotos como clipes, quadro congelado e fps na exportação.
+
+**Novidades da 3.2.11:**
+- **Normalizar volume do clipe:** no Mixer, o botão ajusta o volume do clipe selecionado para o pico do trecho cortado chegar
+  a cerca de 90%. Sobe voz baixa (até 200%) e desce áudio alto (até 20%). Usa a forma de onda; se ela ainda estiver sendo
+  analisada, o app pede para tentar de novo. Dá para desfazer. Na prévia o volume não passa de 100%; o ganho acima disso vale na exportação.
 
 **Novidades da 3.2.10:**
 - Só correção de um teste unitário (`snap`): o valor do teste estava errado, o código estava certo.

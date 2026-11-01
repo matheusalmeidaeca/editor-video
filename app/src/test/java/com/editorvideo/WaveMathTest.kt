@@ -39,4 +39,25 @@ class WaveMathTest {
         assertEquals(50L, WaveMath.bucketFor(10L * 60_000L))
         assertEquals(200L, WaveMath.bucketFor(31L * 60_000L))
     }
+
+    @Test
+    fun volumeSobeVozBaixa() {
+        assertEquals(180, WaveMath.volumeFor(0.5f))
+    }
+
+    @Test
+    fun volumeDesceAudioAlto() {
+        assertEquals(90, WaveMath.volumeFor(1.0f))
+    }
+
+    @Test
+    fun volumeRespeitaLimites() {
+        assertEquals(200, WaveMath.volumeFor(0.2f))
+        assertEquals(20, WaveMath.volumeFor(10f))
+    }
+
+    @Test
+    fun trechoMudoNaoNormaliza() {
+        assertEquals(null, WaveMath.volumeFor(0.005f))
+    }
 }

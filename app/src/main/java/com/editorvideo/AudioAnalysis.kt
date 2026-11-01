@@ -235,6 +235,16 @@ internal object WaveMath {
         return m
     }
 
+    /**
+     * Volume (em %, como o controle do clipe) que leva o pico [peak] (0 a 1) até [target].
+     * Limitado a [minPct]..[maxPct]. Devolve null se o trecho é praticamente mudo.
+     */
+    fun volumeFor(peak: Float, target: Float = 0.9f, minPct: Int = 20, maxPct: Int = 200): Int? {
+        if (peak < 0.01f) return null
+        val pct = Math.round(target / peak * 100f)
+        return pct.coerceIn(minPct, maxPct)
+    }
+
     /** Altura relativa (0 a 1) de uma barra: raiz do pico sobre o maior pico, para realçar sons baixos. */
     fun level(peak: Float, norm: Float): Float {
         if (norm <= 0f) return 0f

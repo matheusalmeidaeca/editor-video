@@ -1437,6 +1437,35 @@ class MainActivity : ComponentActivity() {
         showTool(currentTool)
     }
 
+    /**
+     * Ajusta o volume do clipe para o pico do trecho cortado chegar a cerca de 90% (sobe voz baixa, desce áudio alto).
+     * Usa a forma de onda já analisada; se ela ainda não existe, pede para tentar de novo.
+     * Na prévia o volume não passa de 100%; o ganho acima disso vale na exportação.
+     */
+    private fun normalizarVolume(c: Clip) {
+        val wd = waveFor(c.uri, c.durationMs)
+        if (wd == null) {
+            toast("A forma de onda ainda está sendo analisada, ou o clipe não tem som. Tente de novo em alguns segundos.")
+            return
+        }
+        val pico = WaveMath.maxIn(wd.peaks, wd.bucketMs, c.startMs.toDouble(), c.endMs.toDouble())
+        val novo = WaveMath.volumeFor(pico)
+        if (novo == null) {
+            statusTv.text = "Este trecho está praticamente mudo; não normalizei."
+            return
+        }
+        if (novo == c.vol) {
+            statusTv.text = "O volume já está no ponto (${c.vol}%)."
+            return
+        }
+        pushUndo()
+        c.vol = novo
+        applyVolume()
+        scheduleSave()
+        statusTv.text = "Volume do clipe: $novo% (o pico original era ${Math.round(pico * 100)}%)."
+        showTool(currentTool)
+    }
+
     private fun panelAudio(): View {
         val box = vbox()
         box.addView(section("Clipe selecionado"))
@@ -1455,6 +1484,7 @@ class MainActivity : ComponentActivity() {
             labeledSeek(box, { "Fade de saída do áudio: ${it / 10},${it % 10} s" }, 0, 30, c.fadeOut / 100,
                 { c.fadeOut = it * 100 }, { pushUndo() }, { scheduleSave() })
             box.addView(tv("O fade de cada clipe é aplicado ao exportar; a prévia ainda não o mostra.", 12f, cGrey), lpm(WRAP, WRAP, t = 4))
+            box.addView(btn("Normalizar volume do clipe") { normalizarVolume(c) }, lpm(WRAP, WRAP, t = 8))
             box.addView(btn("Extrair áudio deste clipe") { extrairAudio(c) }, lpm(WRAP, WRAP, t = 8))
         }
         val cb = CheckBox(this).apply {
