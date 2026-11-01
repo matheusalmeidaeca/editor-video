@@ -76,4 +76,32 @@ class ProjectStateTest {
         assertTrue(s.effs().isEmpty())
         assertEquals(TimelineMath.boundaries(emptyList()), s.bounds())
     }
+
+    @Test
+    fun logo_e_musica_novos_campos_padrao_reset_e_snapshot() {
+        val s = ProjectState()
+        assertNull(s.logoUri)
+        assertEquals(3, s.logoPos)
+        assertEquals(1, s.logoSize)
+        assertEquals(0, s.logoAlpha)
+        assertEquals(false, s.musicLoop)
+        s.logoPos = 0
+        s.logoSize = 2
+        s.logoAlpha = 3
+        s.musicFadeIn = 2
+        s.musicFadeOut = 3
+        s.musicLoop = true
+        val snap = s.snapshot()
+        s.reset()
+        assertEquals(3, s.logoPos)
+        assertEquals(0, s.musicFadeIn)
+        assertEquals(false, s.musicLoop)
+        s.restore(snap)
+        assertEquals(0, s.logoPos)
+        assertEquals(2, s.logoSize)
+        assertEquals(3, s.logoAlpha)
+        assertEquals(2, s.musicFadeIn)
+        assertEquals(3, s.musicFadeOut)
+        assertEquals(true, s.musicLoop)
+    }
 }

@@ -33,6 +33,42 @@ internal fun filterEffects(i: Int): List<Effect> = when (i) {
     9 -> listOf(HslAdjustment.Builder().adjustSaturation(-30f).build(), Contrast(0.4f))
     10 -> listOf(RgbFilter.createGrayscaleFilter(), Contrast(0.4f))
     11 -> listOf(Contrast(-0.3f), Brightness(0.08f))
+    12 -> listOf(
+        RgbAdjustment.Builder().setRedScale(1.1f).setGreenScale(0.9f).setBlueScale(1.2f).build(),
+        HslAdjustment.Builder().adjustSaturation(30f).build(),
+        Contrast(0.2f)
+    )
+    13 -> listOf(
+        RgbAdjustment.Builder().setRedScale(1.2f).setGreenScale(0.95f).setBlueScale(0.75f).build(),
+        HslAdjustment.Builder().adjustSaturation(15f).build(),
+        Brightness(0.04f)
+    )
+    14 -> listOf(
+        RgbAdjustment.Builder().setRedScale(0.8f).setGreenScale(1.2f).setBlueScale(0.85f).build(),
+        HslAdjustment.Builder().adjustSaturation(-10f).build(),
+        Contrast(0.25f)
+    )
+    15 -> listOf(
+        RgbAdjustment.Builder().setRedScale(1.1f).setGreenScale(0.92f).setBlueScale(1.05f).build(),
+        HslAdjustment.Builder().adjustSaturation(10f).build(),
+        Brightness(0.05f)
+    )
+    16 -> listOf(Contrast(0.6f), HslAdjustment.Builder().adjustSaturation(10f).build())
+    17 -> listOf(
+        RgbAdjustment.Builder().setRedScale(1.08f).setGreenScale(0.96f).setBlueScale(1.04f).build(),
+        HslAdjustment.Builder().adjustSaturation(15f).build(),
+        Contrast(0.2f)
+    )
+    18 -> listOf(
+        HslAdjustment.Builder().adjustSaturation(-25f).build(),
+        Contrast(-0.2f),
+        Brightness(0.05f)
+    )
+    19 -> listOf(
+        RgbAdjustment.Builder().setRedScale(0.95f).setGreenScale(1.0f).setBlueScale(1.08f).build(),
+        Contrast(0.15f),
+        Brightness(0.12f)
+    )
     else -> emptyList()
 }
 
@@ -75,11 +111,11 @@ internal fun zoomEffect(c: Clip, export: Boolean): Effect {
 
 internal fun videoEffects(c: Clip, export: Boolean): List<Effect> {
     val v = ArrayList<Effect>()
-    if (c.rotation != 0 || c.flip) {
+    if (c.rotation != 0 || c.flip || c.flipV) {
         v.add(
             ScaleAndRotateTransformation.Builder()
                 .setRotationDegrees(-c.rotation.toFloat())
-                .setScale(if (c.flip) -1f else 1f, 1f)
+                .setScale(if (c.flip) -1f else 1f, if (c.flipV) -1f else 1f)
                 .build()
         )
     }
@@ -87,6 +123,16 @@ internal fun videoEffects(c: Clip, export: Boolean): List<Effect> {
         v.add(zoomEffect(c, export))
     }
     v.addAll(filterEffects(c.filter))
+    if (c.temp != 0 || c.tint != 0) {
+        // temperatura: vermelho sobe e azul desce (ou o contrário); tonalidade mexe no verde
+        v.add(
+            RgbAdjustment.Builder()
+                .setRedScale(1f + c.temp / 200f)
+                .setGreenScale(1f - c.tint / 200f)
+                .setBlueScale(1f - c.temp / 200f)
+                .build()
+        )
+    }
     if (c.sat != 0) v.add(HslAdjustment.Builder().adjustSaturation(c.sat.toFloat()).build())
     if (c.brightness != 0) v.add(Brightness(c.brightness / 100f))
     if (c.contrast != 0) v.add(Contrast(c.contrast / 100f))

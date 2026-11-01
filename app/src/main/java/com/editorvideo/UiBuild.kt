@@ -211,6 +211,10 @@ internal fun MainActivity.buildUi() {
     actions.addView(btn("✂ Dividir") { splitClip() }, lpm(WRAP, WRAP, r = 6))
     actions.addView(btn("◧ Cortar à esquerda") { cutAtPlayhead(true) }, lpm(WRAP, WRAP, r = 6))
     actions.addView(btn("Cortar à direita ◨") { cutAtPlayhead(false) }, lpm(WRAP, WRAP, r = 6))
+    actions.addView(btn("◂ 1 quadro") { stepFrame(-33L) }, lpm(WRAP, WRAP, r = 6))
+    actions.addView(btn("1 quadro ▸") { stepFrame(33L) }, lpm(WRAP, WRAP, r = 6))
+    actions.addView(btn("❄ Congelar quadro") { freezeFrame() }, lpm(WRAP, WRAP, r = 6))
+    actions.addView(btn("📷 Quadro → foto") { saveFrameAsPhoto() }, lpm(WRAP, WRAP, r = 6))
     // ações do clipe: só aparecem depois de tocar num clipe da linha do tempo (v3.2.9)
     val grupo = hbox()
     grupo.addView(btn("⧉ Duplicar") { dupClip() }, lpm(WRAP, WRAP, r = 6))
@@ -390,6 +394,7 @@ internal fun MainActivity.showTool(i: Int, animate: Boolean = false) {
         5 -> panelText(false)
         6 -> panelText(true)
         7 -> panelAudio()
+        9 -> panelLogo()
         else -> panelFormat()
     }
     panel.addView(v)

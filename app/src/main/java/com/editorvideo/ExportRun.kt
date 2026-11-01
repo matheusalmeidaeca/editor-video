@@ -127,7 +127,7 @@ internal fun MainActivity.exportar() {
     }
 
     val (ow, oh) = outputSize()
-    val composition = ExportComposition.build(clips, texts, exportSettings())
+    val composition = ExportComposition.build(clips, texts, exportSettings(true))
 
     val saida = File(cacheDir, "saida_${System.currentTimeMillis()}.mp4")
 

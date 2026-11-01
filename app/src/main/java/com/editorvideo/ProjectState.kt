@@ -28,6 +28,13 @@ internal class ProjectState {
     var transType = 0
     var transIdx = 1
     var projectName = "Meu projeto"
+    var logoUri: Uri? = null      // logo/marca d'água (v3.3.12)
+    var logoPos = 3               // 0 sup. esq., 1 sup. dir., 2 inf. esq., 3 inf. dir., 4 centro
+    var logoSize = 1              // índice em LogoMath.sizeFrac
+    var logoAlpha = 0             // índice em LogoMath.alphaValues
+    var musicFadeIn = 0           // índice em MainActivity.musicFadeMs
+    var musicFadeOut = 0
+    var musicLoop = false         // repete a música até o fim do vídeo
 
     /** Duração de cada clipe já com a velocidade aplicada. */
     fun effs(): List<Long> = clips.map { it.effMs }
@@ -59,13 +66,21 @@ internal class ProjectState {
         transType = 0
         transIdx = 1
         projectName = "Meu projeto"
+        logoUri = null
+        logoPos = 3
+        logoSize = 1
+        logoAlpha = 0
+        musicFadeIn = 0
+        musicFadeOut = 0
+        musicLoop = false
     }
 
     fun snapshot() = Snapshot(
         clips.map { it.copy() }, texts.toList(), selected,
         musicUri, musicName, musicDurMs, musicVol,
         voiceUri, voiceDurMs, voiceVol,
-        muteOriginal, aspectIdx, qualityIdx, fitIdx, fadeInIdx, fadeOutIdx, transType, transIdx
+        muteOriginal, aspectIdx, qualityIdx, fitIdx, fadeInIdx, fadeOutIdx, transType, transIdx,
+        logoUri, logoPos, logoSize, logoAlpha, musicFadeIn, musicFadeOut, musicLoop
     )
 
     fun restore(s: Snapshot) {
@@ -89,5 +104,12 @@ internal class ProjectState {
         fadeOutIdx = s.fadeOutIdx
         transType = s.transType
         transIdx = s.transIdx
+        logoUri = s.logoUri
+        logoPos = s.logoPos
+        logoSize = s.logoSize
+        logoAlpha = s.logoAlpha
+        musicFadeIn = s.musicFadeIn
+        musicFadeOut = s.musicFadeOut
+        musicLoop = s.musicLoop
     }
 }

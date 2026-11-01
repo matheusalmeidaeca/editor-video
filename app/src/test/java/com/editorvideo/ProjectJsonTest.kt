@@ -32,4 +32,33 @@ class ProjectJsonTest {
         assertFalse(r.sticker)
         assertEquals(0xFFFFFFFF.toInt(), r.color)
     }
+
+    @Test
+    fun texto_com_estilo_ida_e_volta() {
+        val t = TextItem("Estilo", 0L, 2_000L, 2, 1, 0xFFFFFFFF.toInt(), 1, false, 3, true, 2, 2)
+        val r = ProjectJson.textFromJson(ProjectJson.textToJson(t))
+        assertEquals(3, r.font)
+        assertTrue(r.italic)
+        assertEquals(2, r.bg)
+        assertEquals(2, r.anim)
+    }
+
+    @Test
+    fun texto_sem_estilo_usa_o_visual_antigo() {
+        val j = JSONObject("""{"text":"x","start":0,"end":1500}""")
+        val r = ProjectJson.textFromJson(j)
+        assertEquals(0, r.font)
+        assertFalse(r.italic)
+        assertEquals(0, r.bg)
+        assertEquals(0, r.anim)
+    }
+
+    @Test
+    fun texto_com_valores_fora_da_faixa_e_corrigido() {
+        val j = JSONObject("""{"text":"x","start":0,"end":1500,"font":99,"bg":7,"anim":-3}""")
+        val r = ProjectJson.textFromJson(j)
+        assertEquals(4, r.font)
+        assertEquals(2, r.bg)
+        assertEquals(0, r.anim)
+    }
 }

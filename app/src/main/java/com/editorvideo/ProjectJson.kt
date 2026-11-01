@@ -33,6 +33,9 @@ internal object ProjectJson {
         j.put("py", c.panY)
         j.put("ken", c.ken)
         if (c.isImage) j.put("img", true)
+        if (c.temp != 0) j.put("tmp", c.temp)
+        if (c.tint != 0) j.put("tnt", c.tint)
+        if (c.flipV) j.put("flipv", true)
         return j
     }
 
@@ -56,6 +59,9 @@ internal object ProjectJson {
         c.panX = j.optInt("px", 0)
         c.panY = j.optInt("py", 0)
         c.ken = j.optInt("ken", 0)
+        c.temp = j.optInt("tmp", 0)
+        c.tint = j.optInt("tnt", 0)
+        c.flipV = j.optBoolean("flipv", false)
         return c
     }
 
@@ -69,12 +75,18 @@ internal object ProjectJson {
         j.put("color", t.color)
         j.put("posX", t.posX)
         j.put("sticker", t.sticker)
+        if (t.font != 0) j.put("font", t.font)
+        if (t.italic) j.put("italic", true)
+        if (t.bg != 0) j.put("bg", t.bg)
+        if (t.anim != 0) j.put("anim", t.anim)
         return j
     }
 
     fun textFromJson(j: JSONObject): TextItem = TextItem(
         j.getString("text"), j.getLong("start"), j.getLong("end"),
         j.optInt("pos", 2), j.optInt("size", 1), j.optInt("color", 0xFFFFFFFF.toInt()),
-        j.optInt("posX", 1), j.optBoolean("sticker", false)
+        j.optInt("posX", 1), j.optBoolean("sticker", false),
+        j.optInt("font", 0).coerceIn(0, 4), j.optBoolean("italic", false),
+        j.optInt("bg", 0).coerceIn(0, 2), j.optInt("anim", 0).coerceIn(0, 3)
     )
 }

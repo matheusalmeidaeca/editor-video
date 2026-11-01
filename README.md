@@ -1,4 +1,4 @@
-# Editor de Vídeo 3.3.3 (Android, Kotlin + Media3)
+# Editor de Vídeo 3.3.12 (Android, Kotlin + Media3)
 
 Sem IA. Visual "osmótico": fundo líquido animado, painéis de vidro e botões que respiram.
 
@@ -18,6 +18,19 @@ com nome e proporção (16:9, 9:16, 1:1, 4:3, 3:4, 4:5, 2.35:1), cortar à esque
 transições entre clipes (fade no preto ou no branco), menu radial de adição, diálogo
 "Salvar e compartilhar" (H.264/HEVC, resolução e qualidade com tamanho estimado) e layout
 próprio para a tela deitada.
+
+**Novidades da 3.3.12 (lote grande; nada disto compilou antes de ir ao Actions):**
+- **Quadro a quadro:** botões "◂ 1 quadro" e "1 quadro ▸" na barra de ações.
+- **Congelar quadro:** divide o clipe na agulha e coloca no meio uma foto de 3 s daquele quadro (duração ajustável em Cortar).
+- **Quadro → foto:** salva o quadro da agulha em Imagens/EditorVideo (imagem original, sem filtros nem textos).
+- **Dividir em partes iguais** (2 a 6) em Cortar, para clipes e fotos.
+- **Texto e adesivos:** 5 fontes, itálico, fundo (translúcido, sem fundo ou sólido), 4 cores novas e animação de entrada
+  (fade, pop, subir; aparece só no vídeo exportado). Botão "Duplicar" na lista.
+- **Importar legendas .srt:** cada legenda vira um texto na base da tela (até 500).
+- **Cor:** temperatura e tonalidade, 8 filtros novos (Cyberpunk, Pôr do sol, Matrix, Rosado, Alto contraste, Intenso, Fosco, Gelo),
+  "Girar -90°" e "Espelhar vertical".
+- **Logo / marca d'água:** nova ferramenta "Logo" (imagem, posição em 5 pontos, 3 tamanhos, 4 opacidades), na prévia e na exportação.
+- **Música:** fade de entrada e saída (1 a 3 s) e opção de repetir a música até o fim do vídeo.
 
 **Novidades da 3.3.3 (organização do código, nada muda para quem usa):**
 - Mais três arquivos saíram do `MainActivity`: a montagem da tela e das abas (`UiBuild.kt`), a importação de vídeos (`Importing.kt`)

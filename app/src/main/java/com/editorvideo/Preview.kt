@@ -112,12 +112,14 @@ internal fun MainActivity.refreshOverlay(pos: Long) {
     val lh = overlayLayer.height
     val active = ArrayList<Int>()
     if (pos >= 0L) texts.forEachIndexed { i, t -> if (pos >= t.startMs && pos <= t.endMs) active.add(i) }
-    val key = active.joinToString(",") { System.identityHashCode(texts[it]).toString() } + "|$lw|$lh"
+    val key = active.joinToString(",") { System.identityHashCode(texts[it]).toString() } +
+        "|$lw|$lh|L${logoUri}${logoPos}${logoSize}${logoAlpha}"
     if (key == overlayKey) return
     overlayKey = key
     overlayLayer.removeAllViews()
     if (lw <= 0 || lh <= 0) return
     val shortSide = min(lw, lh).toFloat()
+    addLogoPreview(lw, lh)
     for (i in active) {
         val t = texts[i]
         val view = TextView(this)
@@ -128,8 +130,9 @@ internal fun MainActivity.refreshOverlay(pos: Long) {
         )
         view.setTextColor(t.color)
         if (!t.sticker) {
-            view.setTypeface(view.typeface, Typeface.BOLD)
-            view.setBackgroundColor(if (t.color == Color.BLACK) 0x99FFFFFF.toInt() else 0x66000000)
+            view.setTypeface(TextStyleKit.typeface(t.font, t.italic))
+            val bgc = TextStyleKit.backgroundColor(t.bg, t.color)
+            if (bgc != null) view.setBackgroundColor(bgc)
             view.setPadding(dp(4), 0, dp(4), 0)
         }
         val gv = when (t.pos) {
@@ -146,4 +149,24 @@ internal fun MainActivity.refreshOverlay(pos: Long) {
         lp.setMargins((lw * 0.06f).toInt(), (lh * 0.06f).toInt(), (lw * 0.06f).toInt(), (lh * 0.06f).toInt())
         overlayLayer.addView(view, lp)
     }
+}
+
+/** Mostra o logo no canto escolhido, com as mesmas frações da exportação (v3.3.12). */
+internal fun MainActivity.addLogoPreview(lw: Int, lh: Int) {
+    val u = logoUri ?: return
+    val k = u.toString()
+    if (logoPreview == null || logoPreviewKey != k) {
+        logoPreview = decodeLogo(u, 512)
+        logoPreviewKey = k
+    }
+    val bmp = logoPreview ?: return
+    val r = LogoMath.rect(lw, lh, bmp.width, bmp.height, logoPos, logoSize)
+    val iv = ImageView(this)
+    iv.setImageBitmap(bmp)
+    iv.scaleType = ImageView.ScaleType.FIT_XY
+    iv.alpha = LogoMath.alphaValues[logoAlpha] / 255f
+    val lp = FrameLayout.LayoutParams((r[2] - r[0]).toInt().coerceAtLeast(1), (r[3] - r[1]).toInt().coerceAtLeast(1))
+    lp.leftMargin = r[0].toInt()
+    lp.topMargin = r[1].toInt()
+    overlayLayer.addView(iv, lp)
 }

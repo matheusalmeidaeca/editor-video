@@ -114,6 +114,7 @@ internal fun MainActivity.panelTrim(): View {
         box.addView(tv("Foto selecionada: escolha por quanto tempo ela aparece."))
         labeledSeek(box, { "Duração: ${it / 10},${it % 10} s" }, 5, (Clip.IMAGE_MAX_MS / 100).toInt(),
             ((c.endMs - c.startMs) / 100L).toInt(), { c.endMs = c.startMs + it * 100L }, { pushUndo() }, { afterEdit(selected, 0L) })
+        box.addView(equalSplitRow())
         return box
     }
     val l1 = tv("", 13f)
@@ -146,6 +147,7 @@ internal fun MainActivity.panelTrim(): View {
     r.addView(btn("Fim aqui ⇥") { trimHere(true) }, lpm(WRAP, WRAP, t = 10))
     box.addView(hscroll(r))
     box.addView(btn("Remover silêncios") { removerSilencios() }, lpm(WRAP, WRAP, t = 10))
+    box.addView(equalSplitRow())
     box.addView(
         note("Arraste os controles ou pause no ponto certo e toque em “Início aqui” / “Fim aqui”. Para cortar no meio, use ✂ Dividir. “Remover silêncios” divide o clipe nos trechos com som e tira as pausas longas."),
         lpm(MATCH, WRAP, t = 8)
@@ -251,6 +253,13 @@ internal fun MainActivity.trimHere(isEnd: Boolean) {
     trimDone(isEnd)
 }
 
+internal fun MainActivity.equalSplitRow(): View {
+    val b = vbox()
+    b.addView(section("Dividir em partes iguais"), lpm(WRAP, WRAP, t = 12))
+    b.addView(chipRow(listOf("2", "3", "4", "5", "6"), -1) { i -> splitEqual(i + 2) })
+    return b
+}
+
 internal fun MainActivity.panelSpeed(): View {
     val c = sel() ?: return hint()
     val box = vbox()
@@ -289,6 +298,8 @@ internal fun MainActivity.panelFilters(): View {
     labeledSeek(box, { "Brilho: $it" }, -50, 50, c.brightness, { c.brightness = it }, { pushUndo() }, stop)
     labeledSeek(box, { "Contraste: $it" }, -50, 50, c.contrast, { c.contrast = it }, { pushUndo() }, stop)
     labeledSeek(box, { "Saturação: $it" }, -50, 50, c.sat, { c.sat = it }, { pushUndo() }, stop)
+    labeledSeek(box, { "Temperatura: $it" }, -50, 50, c.temp, { c.temp = it }, { pushUndo() }, stop)
+    labeledSeek(box, { "Tonalidade: $it" }, -50, 50, c.tint, { c.tint = it }, { pushUndo() }, stop)
     val r = hbox()
     r.addView(btn("✨ Auto") {
         pushUndo()
@@ -305,6 +316,8 @@ internal fun MainActivity.panelFilters(): View {
         c.brightness = 0
         c.contrast = 0
         c.sat = 0
+        c.temp = 0
+        c.tint = 0
         applyPreviewEffects()
         refreshTimeline()
         showTool(currentTool)
@@ -316,6 +329,8 @@ internal fun MainActivity.panelFilters(): View {
             it.brightness = c.brightness
             it.contrast = c.contrast
             it.sat = c.sat
+            it.temp = c.temp
+            it.tint = c.tint
         }
         applyPreviewEffects()
         refreshTimeline()
@@ -329,11 +344,17 @@ internal fun MainActivity.panelFilters(): View {
 internal fun MainActivity.panelTransform(): View {
     val c = sel() ?: return hint()
     val box = vbox()
-    box.addView(tv("Rotação: ${c.rotation}°  ·  Espelhado: ${if (c.flip) "sim" else "não"}"))
+    box.addView(tv("Rotação: ${c.rotation}°  ·  Espelhado: ${if (c.flip) "horizontal" else "não"}${if (c.flipV) " + vertical" else ""}"))
     val r = hbox()
     r.addView(btn("↻ Girar 90°") {
         pushUndo()
         c.rotation = (c.rotation + 90) % 360
+        applyPreviewEffects()
+        showTool(currentTool)
+    }, lpm(WRAP, WRAP, t = 6, r = 6))
+    r.addView(btn("↺ Girar -90°") {
+        pushUndo()
+        c.rotation = (c.rotation + 270) % 360
         applyPreviewEffects()
         showTool(currentTool)
     }, lpm(WRAP, WRAP, t = 6, r = 6))
@@ -343,10 +364,17 @@ internal fun MainActivity.panelTransform(): View {
         applyPreviewEffects()
         showTool(currentTool)
     }, lpm(WRAP, WRAP, t = 6, r = 6))
+    r.addView(btn("⇕ Espelhar vertical") {
+        pushUndo()
+        c.flipV = !c.flipV
+        applyPreviewEffects()
+        showTool(currentTool)
+    }, lpm(WRAP, WRAP, t = 6, r = 6))
     r.addView(btn("Redefinir") {
         pushUndo()
         c.rotation = 0
         c.flip = false
+        c.flipV = false
         c.zoom = 100
         c.panX = 0
         c.panY = 0
@@ -404,6 +432,14 @@ internal fun MainActivity.panelText(sticker: Boolean): View {
                 lpm(0, WRAP, weight = 1f)
             )
             r.addView(btn("Editar") { itemDialog(i, sticker) }, lpm(WRAP, WRAP, r = 6))
+            r.addView(btn("Duplicar") {
+                pushUndo()
+                val o = texts[i]
+                val len = o.endMs - o.startMs
+                texts.add(i + 1, TextItem(o.text, o.endMs, o.endMs + len, o.pos, o.size, o.color, o.posX, o.sticker, o.font, o.italic, o.bg, o.anim))
+                overlayKey = ""
+                showTool(currentTool)
+            }, lpm(WRAP, WRAP, r = 6))
             r.addView(btn("Remover") {
                 pushUndo()
                 texts.removeAt(i)
@@ -415,6 +451,8 @@ internal fun MainActivity.panelText(sticker: Boolean): View {
     }
     if (!sticker) {
         box.addView(btn("+ Adicionar texto") { itemDialog(-1, false) }, lpm(WRAP, WRAP, t = if (any) 12 else 4))
+        box.addView(btn("📄 Importar legendas (.srt)") { pickSrt.launch(arrayOf("*/*")) }, lpm(WRAP, WRAP, t = 8))
+        box.addView(note("O arquivo .srt vira um texto por legenda, na base da tela. Muitas legendas deixam a exportação mais lenta."), lpm(MATCH, WRAP, t = 4))
     }
     box.addView(
         note("O tempo vale para o vídeo final (linha do tempo inteira). A prévia mostra uma aproximação."),
@@ -518,6 +556,34 @@ internal fun MainActivity.panelAudio(): View {
     box.addView(hscroll(r))
     if (mu != null) {
         labeledSeek(box, { "Volume da música: $it%" }, 0, 200, musicVol, { musicVol = it }, { pushUndo() }, { scheduleSave() })
+        val cbLoop = CheckBox(this).apply {
+            text = "Repetir a música até o fim do vídeo"
+            setTextColor(cText)
+            buttonTintList = ColorStateList.valueOf(cAccent)
+            isChecked = musicLoop
+            setOnCheckedChangeListener { _, v ->
+                pushUndo()
+                musicLoop = v
+                showTool(currentTool)
+            }
+        }
+        box.addView(cbLoop, lpm(WRAP, WRAP, t = 6))
+        if (musicLoop) {
+            box.addView(note("Com repetição, o fade da música não vale; use o fade final em Formato."), lpm(MATCH, WRAP, t = 4))
+        } else {
+            box.addView(section("Fade de entrada da música"), lpm(WRAP, WRAP, t = 8))
+            box.addView(chipRow(musicFadeNames, musicFadeIn) { i ->
+                pushUndo()
+                musicFadeIn = i
+                showTool(currentTool)
+            })
+            box.addView(section("Fade de saída da música"), lpm(WRAP, WRAP, t = 8))
+            box.addView(chipRow(musicFadeNames, musicFadeOut) { i ->
+                pushUndo()
+                musicFadeOut = i
+                showTool(currentTool)
+            })
+        }
     }
 
     box.addView(section("Narração"), lpm(WRAP, WRAP, t = 14))
@@ -618,6 +684,10 @@ internal fun MainActivity.itemDialog(index: Int, sticker: Boolean, newText: Stri
     var posX = existing?.posX ?: 1
     var size = existing?.size ?: 1
     var col = colorValues.indexOf(existing?.color ?: Color.WHITE).coerceAtLeast(0)
+    var font = existing?.font ?: 0
+    var italic = existing?.italic ?: false
+    var bgMode = existing?.bg ?: 0
+    var anim = existing?.anim ?: 0
     val now = currentTimelineMs()
     val numType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
 
@@ -655,6 +725,27 @@ internal fun MainActivity.itemDialog(index: Int, sticker: Boolean, newText: Stri
         bCol.text = "Cor: ${colorNames[col]}"
     }
 
+    val bFont = btn("Fonte: ${TextStyleKit.fontNames[font]}") {}
+    bFont.setOnClickListener {
+        font = (font + 1) % TextStyleKit.fontNames.size
+        bFont.text = "Fonte: ${TextStyleKit.fontNames[font]}"
+    }
+    val bItalic = btn("Itálico: ${if (italic) "sim" else "não"}") {}
+    bItalic.setOnClickListener {
+        italic = !italic
+        bItalic.text = "Itálico: ${if (italic) "sim" else "não"}"
+    }
+    val bBg = btn("Fundo: ${TextStyleKit.bgNames[bgMode]}") {}
+    bBg.setOnClickListener {
+        bgMode = (bgMode + 1) % TextStyleKit.bgNames.size
+        bBg.text = "Fundo: ${TextStyleKit.bgNames[bgMode]}"
+    }
+    val bAnim = btn("Animação: ${TextAnim.names[anim]}") {}
+    bAnim.setOnClickListener {
+        anim = (anim + 1) % TextAnim.names.size
+        bAnim.text = "Animação: ${TextAnim.names[anim]}"
+    }
+
     val box = vbox().apply { setPadding(dp(20), dp(12), dp(20), 0) }
     if (!sticker) box.addView(et)
     box.addView(st)
@@ -663,6 +754,13 @@ internal fun MainActivity.itemDialog(index: Int, sticker: Boolean, newText: Stri
     box.addView(bPosX, lpm(MATCH, WRAP, t = 6))
     box.addView(bSize, lpm(MATCH, WRAP, t = 6))
     if (!sticker) box.addView(bCol, lpm(MATCH, WRAP, t = 6))
+    if (!sticker) {
+        box.addView(bFont, lpm(MATCH, WRAP, t = 6))
+        box.addView(bItalic, lpm(MATCH, WRAP, t = 6))
+        box.addView(bBg, lpm(MATCH, WRAP, t = 6))
+    }
+    box.addView(bAnim, lpm(MATCH, WRAP, t = 6))
+    box.addView(note("A animação aparece só no vídeo exportado."), lpm(MATCH, WRAP, t = 4))
 
     showStyled(
         AlertDialog.Builder(this)
@@ -675,7 +773,7 @@ internal fun MainActivity.itemDialog(index: Int, sticker: Boolean, newText: Stri
                     var e = parseMs(en.text.toString()) ?: (s + 3000L)
                     if (e <= s) e = s + 1000L
                     pushUndo()
-                    val item = TextItem(txt, s, e, pos, size, colorValues[col], posX, sticker)
+                    val item = TextItem(txt, s, e, pos, size, colorValues[col], posX, sticker, font, italic, bgMode, anim)
                     if (existing == null) texts.add(item) else texts[index] = item
                     overlayKey = ""
                     showTool(currentTool)
@@ -683,4 +781,50 @@ internal fun MainActivity.itemDialog(index: Int, sticker: Boolean, newText: Stri
             }
             .setNegativeButton("Cancelar", null)
     )
+}
+
+/** Logo ou marca d'água sobre o vídeo inteiro (v3.3.12). */
+internal fun MainActivity.panelLogo(): View {
+    val box = vbox()
+    val lu = logoUri
+    box.addView(tv(if (lu == null) "Nenhum logo ou marca d'água." else "Logo escolhido.", 13f))
+    val r = hbox()
+    r.addView(btn("🏷️ Escolher imagem") { pickLogo.launch(arrayOf("image/*")) }, lpm(WRAP, WRAP, t = 8, r = 6))
+    if (lu != null) {
+        r.addView(btn("Remover") {
+            pushUndo()
+            logoUri = null
+            overlayKey = ""
+            showTool(currentTool)
+        }, lpm(WRAP, WRAP, t = 8))
+    }
+    box.addView(hscroll(r))
+    if (lu != null) {
+        box.addView(section("Posição"), lpm(WRAP, WRAP, t = 12))
+        box.addView(chipRow(logoPosNames, logoPos) { i ->
+            pushUndo()
+            logoPos = i
+            overlayKey = ""
+            showTool(currentTool)
+        })
+        box.addView(section("Tamanho"), lpm(WRAP, WRAP, t = 10))
+        box.addView(chipRow(logoSizeNames, logoSize) { i ->
+            pushUndo()
+            logoSize = i
+            overlayKey = ""
+            showTool(currentTool)
+        })
+        box.addView(section("Opacidade"), lpm(WRAP, WRAP, t = 10))
+        box.addView(chipRow(logoAlphaNames, logoAlpha) { i ->
+            pushUndo()
+            logoAlpha = i
+            overlayKey = ""
+            showTool(currentTool)
+        })
+    }
+    box.addView(
+        note("O logo fica em todo o vídeo exportado. PNG com fundo transparente fica melhor. A prévia mostra uma aproximação."),
+        lpm(MATCH, WRAP, t = 10)
+    )
+    return box
 }

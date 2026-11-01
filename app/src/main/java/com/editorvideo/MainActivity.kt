@@ -133,6 +133,13 @@ class MainActivity : ComponentActivity() {
     internal var bitrateIdx = 1
     internal var fpsIdx = 0
     internal var projectName by state::projectName
+    internal var logoUri by state::logoUri
+    internal var logoPos by state::logoPos
+    internal var logoSize by state::logoSize
+    internal var logoAlpha by state::logoAlpha
+    internal var musicFadeIn by state::musicFadeIn
+    internal var musicFadeOut by state::musicFadeOut
+    internal var musicLoop by state::musicLoop
     internal var exporting = false
     internal var extractingAudio = false
     internal var analysingSilence = false
@@ -160,17 +167,28 @@ class MainActivity : ComponentActivity() {
     internal val fadeMs = listOf(0L, 500L, 1000L, 2000L)
     internal val filterNames = listOf(
         "Normal", "P&B", "Vívido", "Quente", "Frio", "Invertido",
-        "Sépia", "Cinema", "Vintage", "Dramático", "Noir", "Esmaecido"
+        "Sépia", "Cinema", "Vintage", "Dramático", "Noir", "Esmaecido",
+        "Cyberpunk", "Pôr do sol", "Matrix", "Rosado", "Alto contraste", "Intenso", "Fosco", "Gelo"
     )
     internal val kenNames = listOf("Nenhum", "Aproximar", "Afastar", "Panorâmica →", "Panorâmica ←")
     internal val speeds = listOf(0.25f, 0.5f, 0.75f, 1f, 1.5f, 2f, 3f, 4f)
-    internal val toolNames = listOf("Cortar", "Velocidade", "Efeitos", "Transformar", "Transição", "Texto", "Adesivos", "Volume", "Formato")
-    internal val toolIcons = listOf("✂️", "⏩", "🎨", "🔄", "🔀", "🔤", "😀", "🔊", "📐")
+    internal val toolNames = listOf("Cortar", "Velocidade", "Efeitos", "Transformar", "Transição", "Texto", "Adesivos", "Volume", "Formato", "Logo")
+    internal val toolIcons = listOf("✂️", "⏩", "🎨", "🔄", "🔀", "🔤", "😀", "🔊", "📐", "🏷️")
     internal val posNames = listOf("Topo", "Centro", "Base")
     internal val posXNames = listOf("Esquerda", "Centro", "Direita")
     internal val sizeNames = listOf("Pequeno", "Médio", "Grande")
-    internal val colorNames = listOf("Branco", "Amarelo", "Vermelho", "Ciano", "Preto")
-    internal val colorValues = listOf(Color.WHITE, Color.YELLOW, Color.RED, Color.CYAN, Color.BLACK)
+    internal val colorNames = listOf("Branco", "Amarelo", "Vermelho", "Ciano", "Preto", "Laranja", "Verde", "Rosa", "Azul")
+    internal val colorValues = listOf(
+        Color.WHITE, Color.YELLOW, Color.RED, Color.CYAN, Color.BLACK,
+        Color.parseColor("#FF9800"), Color.parseColor("#4CAF50"), Color.parseColor("#FF4081"), Color.parseColor("#448AFF")
+    )
+    internal val logoPosNames = listOf("Sup. esquerdo", "Sup. direito", "Inf. esquerdo", "Inf. direito", "Centro")
+    internal val logoSizeNames = listOf("Pequeno", "Médio", "Grande")
+    internal val logoAlphaNames = listOf("100%", "75%", "50%", "30%")
+    internal val musicFadeNames = listOf("Sem", "1 s", "2 s", "3 s")
+    internal val musicFadeMs = listOf(0L, 1000L, 2000L, 3000L)
+    internal var logoPreview: Bitmap? = null
+    internal var logoPreviewKey = ""
     internal val emojis = listOf(
         "😀", "😂", "😍", "😎", "🥳", "🔥", "❤️", "⭐", "✨", "🎉",
         "👍", "👏", "💯", "🎵", "🌈", "💥", "👑", "🚀", "🌸", "🐶"
@@ -282,6 +300,28 @@ class MainActivity : ComponentActivity() {
                 }
                 showTool(currentTool)
             }
+        }
+
+    // Logo / marca d'água (v3.3.12): fica guardado como acesso persistente, igual à música.
+    internal val pickLogo =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) {
+                keepAccess(uri)
+                if (decodeLogo(uri, 256) == null) {
+                    toast("Não consegui abrir essa imagem")
+                } else {
+                    pushUndo()
+                    logoUri = uri
+                    overlayKey = ""
+                    showTool(currentTool)
+                }
+            }
+        }
+
+    // Legendas .srt viram textos na linha do tempo (v3.3.12).
+    internal val pickSrt =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) importSrt(uri)
         }
 
     internal val askNotif =
@@ -1035,7 +1075,7 @@ class MainActivity : ComponentActivity() {
 
     // ------------------------------------------------------------------ exportação
 
-    internal fun exportSettings() = ExportSettings(
+    internal fun exportSettings(withLogo: Boolean = false) = ExportSettings(
         aspectRatio = aspectRatios[aspectIdx],
         shortSide = qualityShort[qualityIdx],
         cropToFill = fitIdx == 0,
@@ -1044,9 +1084,15 @@ class MainActivity : ComponentActivity() {
         fadeOutMs = fadeMs[fadeOutIdx],
         transType = transType,
         transHalfMs = transDur[transIdx] / 2,
-        music = musicUri?.let { ExtraAudio(it, musicDurMs, musicVol) },
+        music = musicUri?.let {
+            ExtraAudio(it, musicDurMs, musicVol, musicFadeMs[musicFadeIn], musicFadeMs[musicFadeOut], musicLoop)
+        },
         voice = voiceUri?.let { ExtraAudio(it, voiceDurMs, voiceVol) },
-        maxFps = ExportHelpers.maxFps(fpsIdx)
+        maxFps = ExportHelpers.maxFps(fpsIdx),
+        logo = if (withLogo) logoUri?.let { decodeLogo(it, 1024) } else null,
+        logoPos = logoPos,
+        logoSize = logoSize,
+        logoAlpha = LogoMath.alphaValues[logoAlpha]
     )
 
     internal fun outputSize(): Pair<Int, Int> = ExportComposition.outputSize(clips, exportSettings())

@@ -29,6 +29,9 @@ internal class Clip(val uri: Uri, val name: String, val durationMs: Long, val w:
     var panX = 0
     var panY = 0
     var ken = 0
+    var temp = 0     // temperatura de cor: negativo esfria, positivo esquenta (v3.3.12)
+    var tint = 0     // tonalidade: negativo esverdeia, positivo puxa para o magenta (v3.3.12)
+    var flipV = false  // espelhado na vertical (v3.3.12)
     var thumb: Bitmap? = null
     var isImage = false  // foto: sem áudio nem velocidade; a duração é endMs - startMs (v3.3.11)
 
@@ -57,6 +60,9 @@ internal class Clip(val uri: Uri, val name: String, val durationMs: Long, val w:
         c.panX = panX
         c.panY = panY
         c.ken = ken
+        c.temp = temp
+        c.tint = tint
+        c.flipV = flipV
         c.thumb = thumb
         c.isImage = isImage
         return c
@@ -71,20 +77,35 @@ internal class TextItem(
     val size: Int,
     val color: Int,
     val posX: Int = 1,
-    val sticker: Boolean = false
+    val sticker: Boolean = false,
+    val font: Int = 0,        // índice em TextStyleKit.families (v3.3.12)
+    val italic: Boolean = false,
+    val bg: Int = 0,          // 0 translúcido (padrão antigo), 1 sem fundo, 2 sólido
+    val anim: Int = 0         // 0 nenhuma, 1 fade, 2 pop, 3 subir
 )
 
 internal class TimedText(
     val item: TextItem,
     val span: SpannableString,
     val shown: OverlaySettings,
-    val hidden: OverlaySettings
+    val hidden: OverlaySettings,
+    val x: Float = 0f,
+    val y: Float = 0f
 ) : TextOverlay() {
     override fun getText(presentationTimeUs: Long): SpannableString = span
 
     override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings {
         val ms = presentationTimeUs / 1000
-        return if (ms >= item.startMs && ms <= item.endMs) shown else hidden
+        if (item.anim == 0) {
+            return if (ms >= item.startMs && ms <= item.endMs) shown else hidden
+        }
+        // com animação: opacidade, escala e deslocamento vertical mudam a cada quadro
+        val f = TextAnim.frame(item.anim, ms, item.startMs, item.endMs)
+        return StaticOverlaySettings.Builder()
+            .setBackgroundFrameAnchor(x, (y + f[2]).coerceIn(-1f, 1f))
+            .setAlphaScale(f[0])
+            .setScale(f[1], f[1])
+            .build()
     }
 }
 
@@ -151,5 +172,12 @@ internal class Snapshot(
     val fadeInIdx: Int,
     val fadeOutIdx: Int,
     val transType: Int,
-    val transIdx: Int
+    val transIdx: Int,
+    val logoUri: Uri? = null,
+    val logoPos: Int = 3,
+    val logoSize: Int = 1,
+    val logoAlpha: Int = 0,
+    val musicFadeIn: Int = 0,
+    val musicFadeOut: Int = 0,
+    val musicLoop: Boolean = false
 )

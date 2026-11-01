@@ -10,6 +10,7 @@ import android.text.style.AbsoluteSizeSpan
 import android.text.style.BackgroundColorSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
+import android.text.style.TypefaceSpan
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.audio.AudioProcessor
@@ -37,7 +38,14 @@ internal object TextLayout {
 }
 
 /** Música ou narração que entra como trilha de áudio extra. */
-internal class ExtraAudio(val uri: Uri, val durMs: Long, val vol: Int)
+internal class ExtraAudio(
+    val uri: Uri,
+    val durMs: Long,
+    val vol: Int,
+    val fadeInMs: Long = 0L,    // fade da música (v3.3.12); ignorado com repetição
+    val fadeOutMs: Long = 0L,
+    val loop: Boolean = false   // repete a música até o fim do vídeo
+)
 
 /** Tudo o que a exportação precisa saber além dos clipes e dos textos. */
 internal class ExportSettings(
@@ -51,7 +59,11 @@ internal class ExportSettings(
     val transHalfMs: Long,
     val music: ExtraAudio?,
     val voice: ExtraAudio?,
-    val maxFps: Int = 0   // 0 = manter a original; senão limita (só reduz, nunca aumenta)
+    val maxFps: Int = 0,   // 0 = manter a original; senão limita (só reduz, nunca aumenta)
+    val logo: Bitmap? = null,   // imagem do logo já lida (v3.3.12)
+    val logoPos: Int = 3,
+    val logoSize: Int = 1,
+    val logoAlpha: Int = 255
 )
 
 internal object ExportComposition {
@@ -63,10 +75,13 @@ internal object ExportComposition {
 
     private fun audioItem(a: ExtraAudio, totalMs: Long): EditedMediaItem {
         val cb = MediaItem.ClippingConfiguration.Builder()
-        if (a.durMs > 0L) cb.setEndPositionMs(min(a.durMs, totalMs))
+        // com repetição a música inteira entra e a faixa é repetida; sem ela, corta no fim do vídeo
+        val playMs = if (a.durMs > 0L) (if (a.loop) a.durMs else min(a.durMs, totalMs)) else totalMs
+        if (a.durMs > 0L) cb.setEndPositionMs(playMs)
         val media = MediaItem.Builder().setUri(a.uri).setClippingConfiguration(cb.build()).build()
         val ap = ArrayList<AudioProcessor>()
         if (a.vol != 100) ap.add(GainProcessor(a.vol / 100f))
+        if (!a.loop && (a.fadeInMs > 0L || a.fadeOutMs > 0L)) ap.add(FadeProcessor(a.fadeInMs, a.fadeOutMs, playMs))
         return EditedMediaItem.Builder(media)
             .setRemoveVideo(true)
             .setEffects(Effects(ap, emptyList<Effect>()))
@@ -122,15 +137,23 @@ internal object ExportComposition {
             sp.setSpan(AbsoluteSizeSpan((shortOut * factor).toInt()), 0, len, flags)
             if (!t.sticker) {
                 sp.setSpan(ForegroundColorSpan(t.color), 0, len, flags)
-                sp.setSpan(StyleSpan(Typeface.BOLD), 0, len, flags)
-                val bgColor = if (t.color == Color.BLACK) 0x99FFFFFF.toInt() else 0x66000000
-                sp.setSpan(BackgroundColorSpan(bgColor), 0, len, flags)
+                sp.setSpan(TypefaceSpan(TextStyleKit.typeface(t.font, t.italic)), 0, len, flags)
+                val bgColor = TextStyleKit.backgroundColor(t.bg, t.color)
+                if (bgColor != null) sp.setSpan(BackgroundColorSpan(bgColor), 0, len, flags)
             }
             val y = TextLayout.posY[t.pos]
             val x = TextLayout.posXv[t.posX]
             val shown = StaticOverlaySettings.Builder().setBackgroundFrameAnchor(x, y).build()
             val hidden = StaticOverlaySettings.Builder().setBackgroundFrameAnchor(x, y).setAlphaScale(0f).build()
-            overlays.add(TimedText(t, sp, shown, hidden))
+            overlays.add(TimedText(t, sp, shown, hidden, x, y))
+        }
+        // logo/marca d'água: camada do tamanho do quadro, por baixo dos textos
+        val logoSrc = s.logo
+        if (logoSrc != null) {
+            val layer = LogoLayer.compose(logoSrc, ow, oh, s.logoPos, s.logoSize, s.logoAlpha)
+            val ll = ArrayList<TextureOverlay>()
+            ll.add(StaticLogo(layer))
+            compEffects.add(OverlayEffect(ImmutableList.copyOf(ll)))
         }
         if (overlays.isNotEmpty()) compEffects.add(OverlayEffect(ImmutableList.copyOf(overlays)))
         if (s.maxFps > 0) compEffects.add(FrameDropEffect.createDefaultFrameDropEffect(s.maxFps.toFloat()))
@@ -159,7 +182,7 @@ internal object ExportComposition {
 
         val seqs = ArrayList<EditedMediaItemSequence>()
         seqs.add(seqOf(items, clips.any { it.isImage }))
-        s.music?.let { seqs.add(seqOf(listOf(audioItem(it, totalMs)))) }
+        s.music?.let { seqs.add(seqOf(listOf(audioItem(it, totalMs)), false, it.loop && it.durMs > 0L)) }
         s.voice?.let { seqs.add(seqOf(listOf(audioItem(it, totalMs)))) }
 
         return Composition.Builder(seqs)
@@ -169,8 +192,9 @@ internal object ExportComposition {
 }
 
 /** Monta uma faixa pelo Builder (os construtores diretos são obsoletos desde o Media3 1.5). */
-internal fun seqOf(list: List<EditedMediaItem>, forceAudio: Boolean = false): EditedMediaItemSequence {
+internal fun seqOf(list: List<EditedMediaItem>, forceAudio: Boolean = false, loop: Boolean = false): EditedMediaItemSequence {
     val b = EditedMediaItemSequence.Builder()
+    if (loop) b.setIsLooping(true)
     // com fotos na faixa, o primeiro item pode não ter áudio; a Media3 exige a faixa de áudio forçada
     if (forceAudio) b.experimentalSetForceAudioTrack(true)
     for (item in list) b.addItem(item)
