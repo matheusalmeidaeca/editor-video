@@ -15,8 +15,8 @@ android {
         applicationId = "com.editorvideo"
         minSdk = 29
         targetSdk = 34
-        versionCode = 23
-        versionName = "3.3.5"
+        versionCode = 24
+        versionName = "3.3.6"
     }
 
     signingConfigs {
@@ -50,10 +50,10 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-ktx:1.9.1")
-    implementation("androidx.media3:media3-common:1.8.0")
-    implementation("androidx.media3:media3-exoplayer:1.8.0")
-    implementation("androidx.media3:media3-transformer:1.8.0")
-    implementation("androidx.media3:media3-effect:1.8.0")
+    implementation("androidx.media3:media3-common:1.10.1")
+    implementation("androidx.media3:media3-exoplayer:1.10.1")
+    implementation("androidx.media3:media3-transformer:1.10.1")
+    implementation("androidx.media3:media3-effect:1.10.1")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
