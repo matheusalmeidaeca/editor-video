@@ -23,6 +23,28 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      - name: Preparar assinatura fixa (só se os segredos existirem)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/editorvideo.jks"
+            echo "KEYSTORE_FILE=$RUNNER_TEMP/editorvideo.jks" >> "$GITHUB_ENV"
+            echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+            echo "KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+            echo "Assinatura fixa ativada."
+          else
+            echo "Sem segredos de assinatura: build com chave debug temporária."
+          fi
+
+      - name: Testes unitários
+        continue-on-error: true
+        run: gradle testDebugUnitTest --stacktrace
+
       - name: Compilar APK (debug)
         run: gradle assembleDebug --stacktrace
 

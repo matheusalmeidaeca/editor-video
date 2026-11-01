@@ -16,6 +16,7 @@ import android.graphics.Matrix
 import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.media.MediaCodecList
 import android.media.MediaMetadataRetriever
 import android.media.MediaRecorder
 import android.net.Uri
@@ -120,7 +121,7 @@ class MainActivity : ComponentActivity() {
         var ken = 0
         var thumb: Bitmap? = null
 
-        val effMs: Long get() = ((endMs - startMs) / speed).toLong()
+        val effMs: Long get() = TimelineMath.effMs(startMs, endMs, speed)
 
         fun copy(): Clip {
             val c = Clip(uri, name, durationMs, w, h)
@@ -908,10 +909,24 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    /** Avisa se o aparelho não tem codificador para o formato e tamanho escolhidos. */
+    private fun encoderWarning(w: Int, h: Int): String? {
+        val mime = if (codecIdx == 1) MimeTypes.VIDEO_H265 else MimeTypes.VIDEO_H264
+        return try {
+            val ok = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.any { info ->
+                val type = info.supportedTypes.firstOrNull { it.equals(mime, ignoreCase = true) }
+                info.isEncoder && type != null &&
+                    info.getCapabilitiesForType(type).videoCapabilities?.isSizeSupported(w, h) == true
+            }
+            if (ok) null
+            else "Este aparelho pode não codificar ${w}×${h} neste formato. Use uma resolução menor ou H.264."
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     private fun videoBitrate(w: Int, h: Int): Int {
-        val bpp = listOf(0.05f, 0.08f, 0.13f)[bitrateIdx]
-        val f = if (codecIdx == 1) 0.7f else 1f
-        return (w * h * 30f * bpp * f).toInt().coerceIn(800_000, 40_000_000)
+        return TimelineMath.videoBitrate(w, h, bitrateIdx, codecIdx)
     }
 
     private fun exportDialog() {
@@ -925,7 +940,10 @@ class MainActivity : ComponentActivity() {
             val (ow, oh) = outputSize()
             val br = videoBitrate(ow, oh)
             val mb = br / 8.0 * (totalMs() / 1000.0) / 1_000_000.0
-            info.text = "${ow}×${oh} · ${"%.1f".format(br / 1_000_000.0)} Mbps · cerca de ${mb.roundToInt().coerceAtLeast(1)} MB"
+            val base = "${ow}×${oh} · ${"%.1f".format(br / 1_000_000.0)} Mbps · cerca de ${mb.roundToInt().coerceAtLeast(1)} MB"
+            val warn = encoderWarning(ow, oh)
+                ?: if (max(ow, oh) > 2000) "Acima de 1080p pode ficar lento e esquentar o aparelho." else null
+            info.text = if (warn != null) base + "\n" + warn else base
         }
         box.addView(section("Formato"))
         box.addView(chipGroup(listOf("Compatível (H.264)", "Menor arquivo (HEVC)"), codecIdx) { codecIdx = it; upd() })
@@ -1672,9 +1690,7 @@ class MainActivity : ComponentActivity() {
     private fun currentTimelineMs(): Long {
         if (clips.isEmpty() || player.mediaItemCount != clips.size) return 0L
         val idx = player.currentMediaItemIndex.coerceIn(0, clips.size - 1)
-        var cum = 0L
-        for (k in 0 until idx) cum += clips[k].effMs
-        return cum + (player.currentPosition.coerceAtLeast(0L) / clips[idx].speed).toLong()
+        return TimelineMath.timelineMs(clips.map { it.effMs }, idx, player.currentPosition, clips[idx].speed)
     }
 
     private fun rebuildPlayer(index: Int, posMs: Long) {
@@ -2208,25 +2224,7 @@ class MainActivity : ComponentActivity() {
 
     private fun outputSize(): Pair<Int, Int> {
         val first = clips.first()
-        var w = first.w
-        var h = first.h
-        if (first.rotation == 90 || first.rotation == 270) {
-            val t = w
-            w = h
-            h = t
-        }
-        val ratio = aspectRatios[aspectIdx] ?: (w.toFloat() / h)
-        val shortSide = qualityShort[qualityIdx] ?: min(w, h)
-        val ow: Int
-        val oh: Int
-        if (ratio >= 1f) {
-            oh = shortSide
-            ow = (shortSide * ratio).roundToInt()
-        } else {
-            ow = shortSide
-            oh = (shortSide / ratio).roundToInt()
-        }
-        return Pair((ow - ow % 2).coerceAtLeast(2), (oh - oh % 2).coerceAtLeast(2))
+        return TimelineMath.outputSize(first.w, first.h, first.rotation, aspectRatios[aspectIdx], qualityShort[qualityIdx])
     }
 
     private fun audioItem(uri: Uri, durMs: Long, vol: Int): EditedMediaItem {
@@ -2308,7 +2306,8 @@ class MainActivity : ComponentActivity() {
         val fo = fadeMs[fadeOutIdx]
         val compAudio = ArrayList<AudioProcessor>()
         if (fi > 0L || fo > 0L) {
-            val black = Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888)
+            // bitmap mínimo: o overlay é esticado ao quadro, então não precisa ter o tamanho do vídeo
+            val black = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
             black.eraseColor(Color.BLACK)
             val fadeList = ArrayList<TextureOverlay>()
             fadeList.add(FadeOverlay(black, totalMs(), fi, fo))
@@ -2317,13 +2316,8 @@ class MainActivity : ComponentActivity() {
         }
 
         if (transType != 0 && clips.size > 1) {
-            val bounds = ArrayList<Long>()
-            var cum = 0L
-            for (k in 0 until clips.size - 1) {
-                cum += clips[k].effMs
-                bounds.add(cum)
-            }
-            val tb = Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888)
+            val bounds = TimelineMath.boundaries(clips.map { it.effMs })
+            val tb = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
             tb.eraseColor(if (transType == 1) Color.BLACK else Color.WHITE)
             val tl = ArrayList<TextureOverlay>()
             tl.add(TransitionOverlay(tb, bounds, transDur[transIdx] / 2))
