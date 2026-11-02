@@ -32,6 +32,7 @@ internal class Clip(val uri: Uri, val name: String, val durationMs: Long, val w:
     var temp = 0     // temperatura de cor: negativo esfria, positivo esquenta (v3.3.12)
     var tint = 0     // tonalidade: negativo esverdeia, positivo puxa para o magenta (v3.3.12)
     var flipV = false  // espelhado na vertical (v3.3.12)
+    var blur = 0       // desfoque: índice em BlurMath.sigma (v3.3.13)
     var thumb: Bitmap? = null
     var isImage = false  // foto: sem áudio nem velocidade; a duração é endMs - startMs (v3.3.11)
 
@@ -63,6 +64,7 @@ internal class Clip(val uri: Uri, val name: String, val durationMs: Long, val w:
         c.temp = temp
         c.tint = tint
         c.flipV = flipV
+        c.blur = blur
         c.thumb = thumb
         c.isImage = isImage
         return c
@@ -179,5 +181,8 @@ internal class Snapshot(
     val logoAlpha: Int = 0,
     val musicFadeIn: Int = 0,
     val musicFadeOut: Int = 0,
-    val musicLoop: Boolean = false
+    val musicLoop: Boolean = false,
+    val vignette: Int = 0,
+    val bars: Int = 0,
+    val duck: Boolean = false
 )

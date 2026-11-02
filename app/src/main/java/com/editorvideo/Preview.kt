@@ -113,12 +113,13 @@ internal fun MainActivity.refreshOverlay(pos: Long) {
     val active = ArrayList<Int>()
     if (pos >= 0L) texts.forEachIndexed { i, t -> if (pos >= t.startMs && pos <= t.endMs) active.add(i) }
     val key = active.joinToString(",") { System.identityHashCode(texts[it]).toString() } +
-        "|$lw|$lh|L${logoUri}${logoPos}${logoSize}${logoAlpha}"
+        "|$lw|$lh|L${logoUri}${logoPos}${logoSize}${logoAlpha}|V$vignette$bars"
     if (key == overlayKey) return
     overlayKey = key
     overlayLayer.removeAllViews()
     if (lw <= 0 || lh <= 0) return
     val shortSide = min(lw, lh).toFloat()
+    addStylePreview(lw, lh)
     addLogoPreview(lw, lh)
     for (i in active) {
         val t = texts[i]

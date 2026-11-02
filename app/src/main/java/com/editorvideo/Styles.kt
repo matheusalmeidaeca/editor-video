@@ -5,6 +5,8 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.RadialGradient
+import android.graphics.Shader
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.net.Uri
@@ -67,5 +69,44 @@ internal fun MainActivity.decodeLogo(uri: Uri, maxSide: Int): Bitmap? {
         contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, o2) }
     } catch (e: Exception) {
         null
+    }
+}
+
+/** Camada do tamanho do quadro, de uma cor só (fades e transições). Com o tamanho do quadro, funciona esticada ou não. */
+internal object SolidLayer {
+    fun create(ow: Int, oh: Int, color: Int): Bitmap {
+        val b = Bitmap.createBitmap(ow.coerceAtLeast(2), oh.coerceAtLeast(2), Bitmap.Config.ARGB_8888)
+        b.eraseColor(color)
+        return b
+    }
+}
+
+/** Vinheta (bordas escuras) e barras pretas de cinema numa imagem transparente do tamanho do quadro (v3.3.13). */
+internal object StyleLayer {
+    fun compose(ow: Int, oh: Int, vignette: Int, bars: Int): Bitmap {
+        val out = Bitmap.createBitmap(ow.coerceAtLeast(2), oh.coerceAtLeast(2), Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        val a = StyleMath.vignetteAlpha[vignette.coerceIn(0, StyleMath.vignetteAlpha.size - 1)]
+        if (a > 0) {
+            val cx = out.width / 2f
+            val cy = out.height / 2f
+            val radius = Math.hypot(cx.toDouble(), cy.toDouble()).toFloat()
+            val paint = Paint()
+            paint.shader = RadialGradient(
+                cx, cy, radius,
+                intArrayOf(0x00000000, 0x00000000, Color.argb(a, 0, 0, 0)),
+                floatArrayOf(0f, 0.5f, 1f),
+                Shader.TileMode.CLAMP
+            )
+            canvas.drawRect(0f, 0f, out.width.toFloat(), out.height.toFloat(), paint)
+        }
+        val bh = StyleMath.barHeight(out.height, bars)
+        if (bh > 0) {
+            val paint = Paint()
+            paint.color = Color.BLACK
+            canvas.drawRect(0f, 0f, out.width.toFloat(), bh.toFloat(), paint)
+            canvas.drawRect(0f, (out.height - bh).toFloat(), out.width.toFloat(), out.height.toFloat(), paint)
+        }
+        return out
     }
 }

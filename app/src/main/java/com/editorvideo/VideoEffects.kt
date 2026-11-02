@@ -4,6 +4,7 @@ import android.graphics.Matrix
 import androidx.media3.common.Effect
 import androidx.media3.effect.Brightness
 import androidx.media3.effect.Contrast
+import androidx.media3.effect.GaussianBlur
 import androidx.media3.effect.HslAdjustment
 import androidx.media3.effect.MatrixTransformation
 import androidx.media3.effect.RgbAdjustment
@@ -69,6 +70,48 @@ internal fun filterEffects(i: Int): List<Effect> = when (i) {
         Contrast(0.15f),
         Brightness(0.12f)
     )
+    20 -> listOf(
+        RgbAdjustment.Builder().setRedScale(1.15f).setGreenScale(0.98f).setBlueScale(0.8f).build(),
+        HslAdjustment.Builder().adjustSaturation(-5f).build(),
+        Contrast(0.1f)
+    )
+    21 -> listOf(
+        HslAdjustment.Builder().adjustSaturation(45f).build(),
+        RgbAdjustment.Builder().setRedScale(0.9f).setGreenScale(1.1f).setBlueScale(1.25f).build(),
+        Contrast(0.3f)
+    )
+    22 -> listOf(
+        sepiaEffect(),
+        Contrast(-0.1f),
+        Brightness(0.04f)
+    )
+    23 -> listOf(
+        HslAdjustment.Builder().adjustSaturation(-20f).build(),
+        RgbAdjustment.Builder().setRedScale(1.04f).setGreenScale(1.0f).setBlueScale(1.1f).build(),
+        Brightness(0.1f),
+        Contrast(-0.2f)
+    )
+    24 -> listOf(
+        RgbAdjustment.Builder().setRedScale(1.05f).setGreenScale(1.02f).setBlueScale(0.9f).build(),
+        HslAdjustment.Builder().adjustSaturation(-15f).build(),
+        Contrast(0.35f)
+    )
+    25 -> listOf(
+        RgbAdjustment.Builder().setRedScale(1.1f).setGreenScale(1.0f).setBlueScale(0.85f).build(),
+        HslAdjustment.Builder().adjustSaturation(5f).build(),
+        Contrast(0.2f),
+        Brightness(-0.04f)
+    )
+    26 -> listOf(
+        RgbAdjustment.Builder().setRedScale(0.8f).setGreenScale(1.05f).setBlueScale(1.25f).build(),
+        HslAdjustment.Builder().adjustSaturation(20f).build(),
+        Contrast(0.15f)
+    )
+    27 -> listOf(
+        HslAdjustment.Builder().adjustSaturation(-60f).build(),
+        RgbAdjustment.Builder().setRedScale(0.92f).setGreenScale(1.0f).setBlueScale(1.1f).build(),
+        Contrast(0.2f)
+    )
     else -> emptyList()
 }
 
@@ -123,6 +166,7 @@ internal fun videoEffects(c: Clip, export: Boolean): List<Effect> {
         v.add(zoomEffect(c, export))
     }
     v.addAll(filterEffects(c.filter))
+    if (c.blur > 0) v.add(GaussianBlur(BlurMath.sigma[c.blur.coerceIn(0, BlurMath.sigma.size - 1)]))
     if (c.temp != 0 || c.tint != 0) {
         // temperatura: vermelho sobe e azul desce (ou o contrário); tonalidade mexe no verde
         v.add(

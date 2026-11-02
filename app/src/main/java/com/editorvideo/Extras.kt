@@ -107,3 +107,72 @@ internal object SplitMath {
         return out
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// v3.3.13: contas puras novas (sem Android, testáveis na JVM).
+
+/** Escreve legendas no formato SubRip (.srt). */
+internal object SrtWriter {
+    fun time(ms: Long): String {
+        val v = ms.coerceAtLeast(0L)
+        val h = v / 3_600_000L
+        val m = (v % 3_600_000L) / 60_000L
+        val s = (v % 60_000L) / 1_000L
+        val f = v % 1_000L
+        return "%02d:%02d:%02d,%03d".format(h, m, s, f)
+    }
+
+    fun write(cues: List<SrtCue>): String {
+        val sb = StringBuilder()
+        for ((i, q) in cues.withIndex()) {
+            sb.append(i + 1).append('\n')
+            sb.append(time(q.startMs)).append(" --> ").append(time(q.endMs)).append('\n')
+            sb.append(q.text.trim()).append("\n\n")
+        }
+        return sb.toString()
+    }
+}
+
+/** Desloca o tempo de um texto sem deixar o início ficar negativo; a duração se mantém. */
+internal object TextShift {
+    fun shift(start: Long, end: Long, delta: Long): Pair<Long, Long> {
+        val len = (end - start).coerceAtLeast(1L)
+        val ns = (start + delta).coerceAtLeast(0L)
+        return Pair(ns, ns + len)
+    }
+}
+
+/** Rampas de velocidade: o clipe é dividido em partes iguais e cada parte ganha a sua velocidade. */
+internal object SpeedRamp {
+    val names = listOf("Câmera lenta no meio", "Acelerar no fim", "Desacelerar no fim", "Pulso (rápido e lento)")
+    val patterns = listOf(
+        listOf(1f, 0.5f, 1f),
+        listOf(0.75f, 1f, 1.5f, 2f),
+        listOf(2f, 1.5f, 1f, 0.75f),
+        listOf(1f, 0.5f, 1f, 0.5f, 1f)
+    )
+
+    /** Partes [início, fim] relativas ao trecho do clipe, uma por velocidade. Vazio se alguma parte ficar curta demais. */
+    fun parts(total: Long, speeds: List<Float>): List<Pair<Long, Long>> =
+        SplitMath.equalParts(total, speeds.size, 400L)
+}
+
+/** Vinheta e barras de cinema (camada única do tamanho do quadro). */
+internal object StyleMath {
+    val vignetteNames = listOf("Sem", "Suave", "Média", "Forte")
+    val vignetteAlpha = listOf(0, 110, 170, 220)
+    val barsNames = listOf("Sem", "Finas", "Grossas")
+    val barsFrac = listOf(0f, 0.08f, 0.14f)
+
+    /** Altura de cada barra, em pixels, para um quadro de altura [h]. */
+    fun barHeight(h: Int, level: Int): Int =
+        (h * barsFrac[level.coerceIn(0, barsFrac.size - 1)]).toInt()
+
+    fun active(vignette: Int, bars: Int): Boolean = vignette > 0 || bars > 0
+}
+
+/** Desfoque por clipe (desvio padrão em pixels). */
+internal object BlurMath {
+    val names = listOf("Sem", "Suave", "Médio", "Forte")
+    val sigma = listOf(0f, 3f, 8f, 16f)
+}

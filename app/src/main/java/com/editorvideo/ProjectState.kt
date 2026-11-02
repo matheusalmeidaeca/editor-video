@@ -35,6 +35,9 @@ internal class ProjectState {
     var musicFadeIn = 0           // índice em MainActivity.musicFadeMs
     var musicFadeOut = 0
     var musicLoop = false         // repete a música até o fim do vídeo
+    var vignette = 0              // índice em StyleMath.vignetteAlpha (v3.3.13)
+    var bars = 0                  // índice em StyleMath.barsFrac
+    var duck = false              // abaixa a música enquanto a narração toca
 
     /** Duração de cada clipe já com a velocidade aplicada. */
     fun effs(): List<Long> = clips.map { it.effMs }
@@ -73,6 +76,9 @@ internal class ProjectState {
         musicFadeIn = 0
         musicFadeOut = 0
         musicLoop = false
+        vignette = 0
+        bars = 0
+        duck = false
     }
 
     fun snapshot() = Snapshot(
@@ -80,7 +86,8 @@ internal class ProjectState {
         musicUri, musicName, musicDurMs, musicVol,
         voiceUri, voiceDurMs, voiceVol,
         muteOriginal, aspectIdx, qualityIdx, fitIdx, fadeInIdx, fadeOutIdx, transType, transIdx,
-        logoUri, logoPos, logoSize, logoAlpha, musicFadeIn, musicFadeOut, musicLoop
+        logoUri, logoPos, logoSize, logoAlpha, musicFadeIn, musicFadeOut, musicLoop,
+        vignette, bars, duck
     )
 
     fun restore(s: Snapshot) {
@@ -111,5 +118,8 @@ internal class ProjectState {
         musicFadeIn = s.musicFadeIn
         musicFadeOut = s.musicFadeOut
         musicLoop = s.musicLoop
+        vignette = s.vignette
+        bars = s.bars
+        duck = s.duck
     }
 }

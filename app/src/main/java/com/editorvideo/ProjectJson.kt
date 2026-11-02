@@ -36,6 +36,7 @@ internal object ProjectJson {
         if (c.temp != 0) j.put("tmp", c.temp)
         if (c.tint != 0) j.put("tnt", c.tint)
         if (c.flipV) j.put("flipv", true)
+        if (c.blur != 0) j.put("blr", c.blur)
         return j
     }
 
@@ -62,6 +63,7 @@ internal object ProjectJson {
         c.temp = j.optInt("tmp", 0)
         c.tint = j.optInt("tnt", 0)
         c.flipV = j.optBoolean("flipv", false)
+        c.blur = j.optInt("blr", 0).coerceIn(0, BlurMath.sigma.size - 1)
         return c
     }
 

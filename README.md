@@ -1,4 +1,4 @@
-# Editor de Vídeo 3.3.12 (Android, Kotlin + Media3)
+# Editor de Vídeo 3.3.13 (Android, Kotlin + Media3)
 
 Sem IA. Visual "osmótico": fundo líquido animado, painéis de vidro e botões que respiram.
 
@@ -18,6 +18,16 @@ com nome e proporção (16:9, 9:16, 1:1, 4:3, 3:4, 4:5, 2.35:1), cortar à esque
 transições entre clipes (fade no preto ou no branco), menu radial de adição, diálogo
 "Salvar e compartilhar" (H.264/HEVC, resolução e qualidade com tamanho estimado) e layout
 próprio para a tela deitada.
+
+**Novidades da 3.3.13 (segundo lote grande; nada disto compilou antes de ir ao Actions):**
+- **Navegação:** botões "⏮ Início", "◁ Clipe", "Clipe ▷" e "Fim ⏭" na barra de ações.
+- **Cortar:** "Digitar início e fim…" (tempos exatos em segundos) e, nas fotos, "Aplicar esta duração a todas as fotos".
+- **Velocidade:** "Aplicar a todos os clipes" e 4 rampas (câmera lenta no meio, acelerar no fim, desacelerar no fim, pulso).
+- **Efeitos:** desfoque por clipe (suave, médio, forte) e 8 filtros novos (Outono, Neon, Nostalgia, Sonhador, Película, Terra, Oceano, Cinza azulado).
+- **Formato:** vinheta (3 forças) e barras de cinema (finas e grossas), na prévia e na exportação.
+- **Áudio:** "Abaixar a música durante a narração" (música a 30% enquanto a narração toca).
+- **Texto:** "Deslocar tempos…" (acerta legendas importadas), "Exportar textos como .srt" (Download/EditorVideo) e 40 adesivos.
+- **Exportação:** as camadas dos fades e das transições agora têm o tamanho do quadro (antes eram 2×2).
 
 **Novidades da 3.3.12 (lote grande; nada disto compilou antes de ir ao Actions):**
 - **Quadro a quadro:** botões "◂ 1 quadro" e "1 quadro ▸" na barra de ações.

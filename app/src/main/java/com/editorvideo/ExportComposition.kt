@@ -44,7 +44,8 @@ internal class ExtraAudio(
     val vol: Int,
     val fadeInMs: Long = 0L,    // fade da música (v3.3.12); ignorado com repetição
     val fadeOutMs: Long = 0L,
-    val loop: Boolean = false   // repete a música até o fim do vídeo
+    val loop: Boolean = false,  // repete a música até o fim do vídeo
+    val duckMs: Long = 0L       // abaixa a faixa nos primeiros ms (música sob a narração, v3.3.13)
 )
 
 /** Tudo o que a exportação precisa saber além dos clipes e dos textos. */
@@ -63,7 +64,9 @@ internal class ExportSettings(
     val logo: Bitmap? = null,   // imagem do logo já lida (v3.3.12)
     val logoPos: Int = 3,
     val logoSize: Int = 1,
-    val logoAlpha: Int = 255
+    val logoAlpha: Int = 255,
+    val vignette: Int = 0,      // v3.3.13
+    val bars: Int = 0
 )
 
 internal object ExportComposition {
@@ -82,6 +85,7 @@ internal object ExportComposition {
         val ap = ArrayList<AudioProcessor>()
         if (a.vol != 100) ap.add(GainProcessor(a.vol / 100f))
         if (!a.loop && (a.fadeInMs > 0L || a.fadeOutMs > 0L)) ap.add(FadeProcessor(a.fadeInMs, a.fadeOutMs, playMs))
+        if (a.duckMs > 0L) ap.add(DuckProcessor(a.duckMs, DuckProcessor.DUCK_GAIN))
         return EditedMediaItem.Builder(media)
             .setRemoveVideo(true)
             .setEffects(Effects(ap, emptyList<Effect>()))
@@ -147,6 +151,13 @@ internal object ExportComposition {
             val hidden = StaticOverlaySettings.Builder().setBackgroundFrameAnchor(x, y).setAlphaScale(0f).build()
             overlays.add(TimedText(t, sp, shown, hidden, x, y))
         }
+        // vinheta e barras de cinema: camada do tamanho do quadro, por baixo do logo e dos textos
+        if (StyleMath.active(s.vignette, s.bars)) {
+            val styleLayer = StyleLayer.compose(ow, oh, s.vignette, s.bars)
+            val sl = ArrayList<TextureOverlay>()
+            sl.add(StaticLogo(styleLayer))
+            compEffects.add(OverlayEffect(ImmutableList.copyOf(sl)))
+        }
         // logo/marca d'água: camada do tamanho do quadro, por baixo dos textos
         val logoSrc = s.logo
         if (logoSrc != null) {
@@ -161,10 +172,10 @@ internal object ExportComposition {
         val fi = s.fadeInMs
         val fo = s.fadeOutMs
         val compAudio = ArrayList<AudioProcessor>()
-        if (fi > 0L || fo > 0L) {
-            // bitmap mínimo: o overlay é esticado ao quadro, então não precisa ter o tamanho do vídeo
-            val black = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
-            black.eraseColor(Color.BLACK)
+        val needBlack = fi > 0L || fo > 0L || (s.transType == 1 && clips.size > 1)
+        // v3.3.13: camadas de cor única do tamanho do quadro (antes eram 2×2, que só cobriam o quadro se a Media3 esticasse a camada)
+        val black: Bitmap? = if (needBlack) SolidLayer.create(ow, oh, Color.BLACK) else null
+        if ((fi > 0L || fo > 0L) && black != null) {
             val fadeList = ArrayList<TextureOverlay>()
             fadeList.add(FadeOverlay(black, totalMs, fi, fo))
             compEffects.add(OverlayEffect(ImmutableList.copyOf(fadeList)))
@@ -173,8 +184,7 @@ internal object ExportComposition {
 
         if (s.transType != 0 && clips.size > 1) {
             val bounds = TimelineMath.boundaries(clips.map { it.effMs })
-            val tb = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
-            tb.eraseColor(if (s.transType == 1) Color.BLACK else Color.WHITE)
+            val tb: Bitmap = if (s.transType == 1 && black != null) black else SolidLayer.create(ow, oh, Color.WHITE)
             val tl = ArrayList<TextureOverlay>()
             tl.add(TransitionOverlay(tb, bounds, s.transHalfMs))
             compEffects.add(OverlayEffect(ImmutableList.copyOf(tl)))

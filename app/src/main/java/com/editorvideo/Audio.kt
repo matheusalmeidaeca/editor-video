@@ -93,3 +93,58 @@ internal fun clipAudioProcessors(c: Clip): List<AudioProcessor> {
     if (fin > 0L || fout > 0L) a.add(FadeProcessor(fin, fout, c.effMs))
     return a
 }
+
+/**
+ * Abaixa o volume da faixa (a música) durante os primeiros [untilMs] ms, para a narração aparecer por cima.
+ * Depois disso o volume volta ao normal em [RAMP_MS] ms (v3.3.13).
+ */
+class DuckProcessor(
+    private val untilMs: Long,
+    private val duckGain: Float
+) : BaseAudioProcessor() {
+
+    private var frames = 0L
+    private var rate = 44100
+    private var channels = 2
+
+    override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
+        if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT) {
+            throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
+        }
+        rate = inputAudioFormat.sampleRate.coerceAtLeast(1)
+        channels = inputAudioFormat.channelCount.coerceAtLeast(1)
+        frames = 0L
+        return inputAudioFormat
+    }
+
+    private fun gainAt(ms: Long): Float {
+        if (ms < untilMs) return duckGain
+        if (ms < untilMs + RAMP_MS) {
+            val p = (ms - untilMs).toFloat() / RAMP_MS
+            return duckGain + (1f - duckGain) * p
+        }
+        return 1f
+    }
+
+    override fun queueInput(inputBuffer: ByteBuffer) {
+        val n = inputBuffer.remaining()
+        if (n == 0) return
+        val out = replaceOutputBuffer(n)
+        val bytesPerFrame = 2 * channels
+        while (inputBuffer.remaining() >= bytesPerFrame) {
+            val g = gainAt(frames * 1000L / rate)
+            for (ch in 0 until channels) {
+                val s = inputBuffer.getShort().toInt()
+                out.putShort((s * g).toInt().coerceIn(-32768, 32767).toShort())
+            }
+            frames++
+        }
+        while (inputBuffer.hasRemaining()) out.put(inputBuffer.get())
+        out.flip()
+    }
+
+    companion object {
+        const val RAMP_MS = 400L
+        const val DUCK_GAIN = 0.3f
+    }
+}

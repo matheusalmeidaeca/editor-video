@@ -114,6 +114,7 @@ internal fun MainActivity.panelTrim(): View {
         box.addView(tv("Foto selecionada: escolha por quanto tempo ela aparece."))
         labeledSeek(box, { "Duração: ${it / 10},${it % 10} s" }, 5, (Clip.IMAGE_MAX_MS / 100).toInt(),
             ((c.endMs - c.startMs) / 100L).toInt(), { c.endMs = c.startMs + it * 100L }, { pushUndo() }, { afterEdit(selected, 0L) })
+        box.addView(btn("Aplicar esta duração a todas as fotos") { applyPhotoDurationToAll() }, lpm(WRAP, WRAP, t = 10))
         box.addView(equalSplitRow())
         return box
     }
@@ -146,6 +147,7 @@ internal fun MainActivity.panelTrim(): View {
     r.addView(btn("⇤ Início aqui") { trimHere(false) }, lpm(WRAP, WRAP, t = 10, r = 6))
     r.addView(btn("Fim aqui ⇥") { trimHere(true) }, lpm(WRAP, WRAP, t = 10))
     box.addView(hscroll(r))
+    box.addView(btn("Digitar início e fim…") { trimTimesDialog() }, lpm(WRAP, WRAP, t = 10))
     box.addView(btn("Remover silêncios") { removerSilencios() }, lpm(WRAP, WRAP, t = 10))
     box.addView(equalSplitRow())
     box.addView(
@@ -276,6 +278,18 @@ internal fun MainActivity.panelSpeed(): View {
         updateSeekMax()
         showTool(currentTool)
     })
+    box.addView(btn("Aplicar esta velocidade a todos os clipes") {
+        pushUndo()
+        clips.forEach { if (!it.isImage) it.speed = c.speed }
+        afterEdit(selected, 0L)
+        toast("Velocidade aplicada a todos os clipes de vídeo.")
+    }, lpm(WRAP, WRAP, t = 10))
+    box.addView(section("Rampas de velocidade"), lpm(WRAP, WRAP, t = 14))
+    box.addView(chipRow(SpeedRamp.names, -1) { i -> applySpeedRamp(i) })
+    box.addView(
+        note("A rampa divide o clipe em partes iguais e muda a velocidade de cada uma. Dá para desfazer em ↩."),
+        lpm(MATCH, WRAP, t = 6)
+    )
     return box
 }
 
@@ -300,6 +314,14 @@ internal fun MainActivity.panelFilters(): View {
     labeledSeek(box, { "Saturação: $it" }, -50, 50, c.sat, { c.sat = it }, { pushUndo() }, stop)
     labeledSeek(box, { "Temperatura: $it" }, -50, 50, c.temp, { c.temp = it }, { pushUndo() }, stop)
     labeledSeek(box, { "Tonalidade: $it" }, -50, 50, c.tint, { c.tint = it }, { pushUndo() }, stop)
+    box.addView(section("Desfoque"), lpm(WRAP, WRAP, t = 12))
+    box.addView(chipRow(BlurMath.names, c.blur) { i ->
+        pushUndo()
+        c.blur = i
+        applyPreviewEffects()
+        refreshTimeline()
+        showTool(currentTool)
+    })
     val r = hbox()
     r.addView(btn("✨ Auto") {
         pushUndo()
@@ -318,6 +340,7 @@ internal fun MainActivity.panelFilters(): View {
         c.sat = 0
         c.temp = 0
         c.tint = 0
+        c.blur = 0
         applyPreviewEffects()
         refreshTimeline()
         showTool(currentTool)
@@ -331,6 +354,7 @@ internal fun MainActivity.panelFilters(): View {
             it.sat = c.sat
             it.temp = c.temp
             it.tint = c.tint
+            it.blur = c.blur
         }
         applyPreviewEffects()
         refreshTimeline()
@@ -407,7 +431,7 @@ internal fun MainActivity.panelText(sticker: Boolean): View {
     val box = vbox()
     if (sticker) {
         box.addView(tv("Toque num adesivo para colocá-lo na posição atual do vídeo."))
-        val rows = listOf(emojis.subList(0, 10), emojis.subList(10, 20))
+        val rows = emojis.chunked(10)
         for (row in rows) {
             val h = hbox()
             for (e in row) {
@@ -449,9 +473,13 @@ internal fun MainActivity.panelText(sticker: Boolean): View {
             box.addView(r, lpm(MATCH, WRAP, t = 10))
         }
     }
+    if (any) {
+        box.addView(btn("⏱ Deslocar tempos…") { shiftTextsDialog(sticker) }, lpm(WRAP, WRAP, t = 10))
+    }
     if (!sticker) {
-        box.addView(btn("+ Adicionar texto") { itemDialog(-1, false) }, lpm(WRAP, WRAP, t = if (any) 12 else 4))
+        box.addView(btn("+ Adicionar texto") { itemDialog(-1, false) }, lpm(WRAP, WRAP, t = if (any) 8 else 4))
         box.addView(btn("📄 Importar legendas (.srt)") { pickSrt.launch(arrayOf("*/*")) }, lpm(WRAP, WRAP, t = 8))
+        if (any) box.addView(btn("💾 Exportar textos como .srt") { exportSrt() }, lpm(WRAP, WRAP, t = 8))
         box.addView(note("O arquivo .srt vira um texto por legenda, na base da tela. Muitas legendas deixam a exportação mais lenta."), lpm(MATCH, WRAP, t = 4))
     }
     box.addView(
@@ -568,6 +596,20 @@ internal fun MainActivity.panelAudio(): View {
             }
         }
         box.addView(cbLoop, lpm(WRAP, WRAP, t = 6))
+        if (voiceUri != null) {
+            val cbDuck = CheckBox(this).apply {
+                text = "Abaixar a música durante a narração"
+                setTextColor(cText)
+                buttonTintList = ColorStateList.valueOf(cAccent)
+                isChecked = duck
+                setOnCheckedChangeListener { _, v ->
+                    pushUndo()
+                    duck = v
+                }
+            }
+            box.addView(cbDuck, lpm(WRAP, WRAP, t = 4))
+            box.addView(note("A música cai para 30% enquanto a narração toca (do começo até o fim dela). Só no vídeo exportado."), lpm(MATCH, WRAP, t = 2))
+        }
         if (musicLoop) {
             box.addView(note("Com repetição, o fade da música não vale; use o fade final em Formato."), lpm(MATCH, WRAP, t = 4))
         } else {
@@ -669,6 +711,21 @@ internal fun MainActivity.panelFormat(): View {
         fadeOutIdx = i
         showTool(currentTool)
     })
+    box.addView(section("Vinheta (bordas escuras)"), lpm(WRAP, WRAP, t = 12))
+    box.addView(chipRow(StyleMath.vignetteNames, vignette) { i ->
+        pushUndo()
+        vignette = i
+        overlayKey = ""
+        showTool(currentTool)
+    })
+    box.addView(section("Barras de cinema"), lpm(WRAP, WRAP, t = 12))
+    box.addView(chipRow(StyleMath.barsNames, bars) { i ->
+        pushUndo()
+        bars = i
+        overlayKey = ""
+        showTool(currentTool)
+    })
+    box.addView(note("Vinheta e barras valem para o vídeo todo, na prévia e na exportação."), lpm(MATCH, WRAP, t = 4))
     val r = hbox()
     r.addView(btn("Nome e proporção…") { projectDialog(false) }, lpm(WRAP, WRAP, t = 16, r = 6))
     r.addView(btn("Novo projeto") { projectDialog(true) }, lpm(WRAP, WRAP, t = 16, r = 6))

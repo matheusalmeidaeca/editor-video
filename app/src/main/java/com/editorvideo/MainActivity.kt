@@ -140,6 +140,9 @@ class MainActivity : ComponentActivity() {
     internal var musicFadeIn by state::musicFadeIn
     internal var musicFadeOut by state::musicFadeOut
     internal var musicLoop by state::musicLoop
+    internal var vignette by state::vignette
+    internal var bars by state::bars
+    internal var duck by state::duck
     internal var exporting = false
     internal var extractingAudio = false
     internal var analysingSilence = false
@@ -168,7 +171,8 @@ class MainActivity : ComponentActivity() {
     internal val filterNames = listOf(
         "Normal", "P&B", "Vívido", "Quente", "Frio", "Invertido",
         "Sépia", "Cinema", "Vintage", "Dramático", "Noir", "Esmaecido",
-        "Cyberpunk", "Pôr do sol", "Matrix", "Rosado", "Alto contraste", "Intenso", "Fosco", "Gelo"
+        "Cyberpunk", "Pôr do sol", "Matrix", "Rosado", "Alto contraste", "Intenso", "Fosco", "Gelo",
+        "Outono", "Neon", "Nostalgia", "Sonhador", "Película", "Terra", "Oceano", "Cinza azulado"
     )
     internal val kenNames = listOf("Nenhum", "Aproximar", "Afastar", "Panorâmica →", "Panorâmica ←")
     internal val speeds = listOf(0.25f, 0.5f, 0.75f, 1f, 1.5f, 2f, 3f, 4f)
@@ -191,7 +195,9 @@ class MainActivity : ComponentActivity() {
     internal var logoPreviewKey = ""
     internal val emojis = listOf(
         "😀", "😂", "😍", "😎", "🥳", "🔥", "❤️", "⭐", "✨", "🎉",
-        "👍", "👏", "💯", "🎵", "🌈", "💥", "👑", "🚀", "🌸", "🐶"
+        "👍", "👏", "💯", "🎵", "🌈", "💥", "👑", "🚀", "🌸", "🐶",
+        "😅", "🤩", "😭", "🥰", "🤔", "😴", "🙌", "💪", "🙏", "👀",
+        "🎬", "📸", "🎮", "⚽", "🍕", "☀️", "🌙", "💡", "🎁", "🏆"
     )
 
     internal val cNavy = Color.parseColor("#04111F")
@@ -1085,14 +1091,19 @@ class MainActivity : ComponentActivity() {
         transType = transType,
         transHalfMs = transDur[transIdx] / 2,
         music = musicUri?.let {
-            ExtraAudio(it, musicDurMs, musicVol, musicFadeMs[musicFadeIn], musicFadeMs[musicFadeOut], musicLoop)
+            ExtraAudio(
+                it, musicDurMs, musicVol, musicFadeMs[musicFadeIn], musicFadeMs[musicFadeOut], musicLoop,
+                if (duck && voiceUri != null) voiceDurMs else 0L
+            )
         },
         voice = voiceUri?.let { ExtraAudio(it, voiceDurMs, voiceVol) },
         maxFps = ExportHelpers.maxFps(fpsIdx),
         logo = if (withLogo) logoUri?.let { decodeLogo(it, 1024) } else null,
         logoPos = logoPos,
         logoSize = logoSize,
-        logoAlpha = LogoMath.alphaValues[logoAlpha]
+        logoAlpha = LogoMath.alphaValues[logoAlpha],
+        vignette = vignette,
+        bars = bars
     )
 
     internal fun outputSize(): Pair<Int, Int> = ExportComposition.outputSize(clips, exportSettings())
